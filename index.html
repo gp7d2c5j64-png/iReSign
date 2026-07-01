@@ -592,6 +592,7 @@ button.secondary {
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 'use strict';
 
@@ -911,408 +912,188 @@ function buildNeighborhood() {
 }
 
 /* =========================================================
-   3D → 2D PROJECTION
-   Perspective camera locked to the craft's full orientation quaternion,
-   then a fixed FPV cam up-tilt. Returns null for points behind the camera.
+   3D RENDERER — Three.js (WebGL)
+   Real meshes, lighting and shadows. Physics/controls are unchanged; each
+   frame we sync the Three.js camera to the craft's pose. Our world is
+   left-handed (X right, Y up, Z forward); Three.js is right-handed, so we
+   map Z -> -Z on every position/vector to stay consistent without mirroring.
    ========================================================= */
-let canvas, ctx, W, H, lastTime = performance.now();
+let canvas, W, H, lastTime = performance.now();
+let renderer, scene, camera3, ready3d = false;
 
-// World point -> camera space [x, y, z] (no perspective divide yet).
-function camSpace(px, py, pz) {
-  const dx = px - craft.pos[0];
-  const dy = py - craft.pos[1];
-  const dz = pz - craft.pos[2];
-
-  // World -> camera frame using the conjugate of the orientation quaternion.
-  // Camera is coupled to the craft's real attitude, so the horizon tilts with
-  // the physical bank (roll-right banks the horizon down to the right).
-  const q = craft.q;
-  const qc = [q[0], -q[1], -q[2], -q[3]];
-  const b = quatRotate(qc, dx, dy, dz);
-  const xb = b[0], yb = b[1], zb = b[2];
-
-  // Fixed FPV camera up-tilt about the body X/right axis. Positive camAngle
-  // tilts the camera UP (like real FPV uptilt) so you look further ahead as
-  // the angle increases.
-  const camTilt = config.camAngle * Math.PI / 180;
-  const cosP = Math.cos(camTilt), sinP = Math.sin(camTilt);
-  return [xb, yb * cosP - zb * sinP, yb * sinP + zb * cosP];
-}
-const NEAR_EPS = 0.05;
-function projectCam(c) {
-  if (c[2] <= NEAR_EPS) return null; // behind camera
-  const f = (H / 2) / Math.tan((config.camFov * Math.PI / 180) / 2);
-  return { sx: W / 2 + (c[0] * f) / c[2], sy: H / 2 - (c[1] * f) / c[2], depth: c[2] };
-}
-function project(px, py, pz) { return projectCam(camSpace(px, py, pz)); }
-
-// Sutherland–Hodgman clip of a camera-space polygon against the near plane.
-function clipNear(poly) {
-  const out = [];
-  for (let i = 0; i < poly.length; i++) {
-    const cur = poly[i], nxt = poly[(i + 1) % poly.length];
-    const curIn = cur[2] >= NEAR_EPS, nxtIn = nxt[2] >= NEAR_EPS;
-    if (curIn) out.push(cur);
-    if (curIn !== nxtIn) {
-      const t = (NEAR_EPS - cur[2]) / (nxt[2] - cur[2]);
-      out.push([cur[0] + (nxt[0]-cur[0])*t, cur[1] + (nxt[1]-cur[1])*t, NEAR_EPS]);
-    }
+function initRenderer() {
+  canvas = document.getElementById('canvas');
+  if (typeof THREE === 'undefined') {
+    const o = document.getElementById('overlay');
+    if (o) o.querySelector('.menu-container').insertAdjacentHTML('afterbegin',
+      '<p style="color:#ff4d4d">3D engine failed to load — check your internet connection and reload.</p>');
+    return;
   }
-  return out;
-}
-// Draw a ground-level segment, clipped to the near plane so it never flips
-// behind the camera.
-function drawGroundSeg(x1, z1, x2, z2) {
-  let a = camSpace(x1, 0, z1), b = camSpace(x2, 0, z2);
-  if (a[2] < NEAR_EPS && b[2] < NEAR_EPS) return;
-  if (a[2] < NEAR_EPS) { const t = (NEAR_EPS-a[2])/(b[2]-a[2]); a = [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, NEAR_EPS]; }
-  else if (b[2] < NEAR_EPS) { const t = (NEAR_EPS-b[2])/(a[2]-b[2]); b = [b[0]+(a[0]-b[0])*t, b[1]+(a[1]-b[1])*t, NEAR_EPS]; }
-  const pa = projectCam(a), pb = projectCam(b);
-  if (pa && pb) { ctx.beginPath(); ctx.moveTo(pa.sx, pa.sy); ctx.lineTo(pb.sx, pb.sy); ctx.stroke(); }
-}
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-function drawPoly(pts, fill, alpha, stroke) {
-  if (pts.length < 3) return;
-  ctx.globalAlpha = alpha !== undefined ? alpha : 1;
-  ctx.fillStyle = fill;
-  ctx.beginPath();
-  ctx.moveTo(pts[0].sx, pts[0].sy);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].sx, pts[i].sy);
-  ctx.closePath();
-  ctx.fill();
-  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
-  ctx.globalAlpha = 1;
-}
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87ceeb);
+  scene.fog = new THREE.Fog(0xcfe8f2, 90, 480);
 
-function fogAlpha(depth) {
-  return Math.max(0, 1 - depth / 150);
+  camera3 = new THREE.PerspectiveCamera(config.camFov, 1, 0.1, 2500);
+
+  const hemi = new THREE.HemisphereLight(0xdceeff, 0x5f7a4a, 1.0);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xfff1d4, 1.05);
+  sun.position.set(60, 110, -40);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  const s = 130;
+  sun.shadow.camera.left = -s; sun.shadow.camera.right = s;
+  sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 500;
+  scene.add(sun); scene.add(sun.target);
+
+  buildScene();
+  ready3d = true;
+  resizeCanvas();
 }
 
-// Darken a #rrggbb hex color by a 0..1 factor (for shaded side faces).
-function shade(hex, factor) {
-  const n = parseInt(hex.slice(1), 16);
-  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  r = Math.round(r * factor); g = Math.round(g * factor); b = Math.round(b * factor);
-  return `rgb(${r},${g},${b})`;
-}
+// Map our forward-Z world onto Three's -Z (keeps left/right correct).
+const MZ = (z) => -z;
 
-/* ---- ground, sky, sun ---- */
-function drawGround() {
-  // Sky gradient
-  const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
-  skyGrad.addColorStop(0, '#4a90d9');
-  skyGrad.addColorStop(0.45, '#87ceeb');
-  skyGrad.addColorStop(1, '#e0f6ff');
-  ctx.fillStyle = skyGrad;
-  ctx.fillRect(0, 0, W, H);
+function buildScene() {
+  // Ground + grid
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(5000, 5000),
+    new THREE.MeshLambertMaterial({ color: 0x6f8a54 }));
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
 
-  // Sun — projected from a far world direction so it parallaxes with heading.
-  const sun = project(-40, 55, craft.pos[2] + 120);
-  if (sun && sun.sy < H * 0.7) {
-    const sg = ctx.createRadialGradient(sun.sx, sun.sy, 4, sun.sx, sun.sy, 90);
-    sg.addColorStop(0, 'rgba(255,250,220,0.95)');
-    sg.addColorStop(0.4, 'rgba(255,240,190,0.35)');
-    sg.addColorStop(1, 'rgba(255,240,190,0)');
-    ctx.fillStyle = sg;
-    ctx.beginPath(); ctx.arc(sun.sx, sun.sy, 90, 0, Math.PI * 2); ctx.fill();
-  }
+  const grid = new THREE.GridHelper(4000, 800, 0xffffff, 0xffffff);
+  grid.material.opacity = 0.08; grid.material.transparent = true;
+  grid.position.y = 0.02;
+  scene.add(grid);
 
-  // Ground plane — a large quad clipped to the near plane so it ALWAYS fills
-  // below the horizon, even when banked or pitched. (The old single unclipped
-  // quad vanished whenever a corner passed behind the camera.)
-  const gy = 0, halfW = 600, gnear = -300, gfar = 900;
-  const groundQuad = clipNear([
-    camSpace(-halfW, gy, craft.pos[2] + gnear),
-    camSpace( halfW, gy, craft.pos[2] + gnear),
-    camSpace( halfW, gy, craft.pos[2] + gfar),
-    camSpace(-halfW, gy, craft.pos[2] + gfar),
-  ]).map(projectCam).filter(Boolean);
-  if (groundQuad.length >= 3) {
-    const gg = ctx.createLinearGradient(0, H, 0, 0);
-    gg.addColorStop(0, '#54703f');
-    gg.addColorStop(1, '#7f9166');
-    ctx.fillStyle = gg;
-    ctx.beginPath();
-    ctx.moveTo(groundQuad[0].sx, groundQuad[0].sy);
-    for (let i = 1; i < groundQuad.length; i++) ctx.lineTo(groundQuad[i].sx, groundQuad[i].sy);
-    ctx.closePath();
-    ctx.fill();
-  }
+  // Road strip down the corridor
+  const road = new THREE.Mesh(
+    new THREE.PlaneGeometry(9, 5000),
+    new THREE.MeshLambertMaterial({ color: 0x3a3f47 }));
+  road.rotation.x = -Math.PI / 2; road.position.y = 0.03; road.receiveShadow = true;
+  scene.add(road);
 
-  // Ground reference grid (every 10 m) — gives depth, motion and altitude cues.
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
-  ctx.lineWidth = 1;
-  const gstep = 10, gridHalf = 150;
-  const baseZ = Math.floor(craft.pos[2] / gstep) * gstep;
-  for (let gx = -gridHalf; gx <= gridHalf; gx += gstep) drawGroundSeg(gx, baseZ - gridHalf, gx, baseZ + gridHalf);
-  for (let gz = baseZ - gridHalf; gz <= baseZ + gridHalf; gz += gstep) drawGroundSeg(-gridHalf, gz, gridHalf, gz);
+  // Houses: walls box + hip roof (4-sided cone), plus door/windows
+  world.houses.forEach(h => {
+    const g = new THREE.Group();
+    const wallH = h.h * 0.72;
+    const walls = new THREE.Mesh(
+      new THREE.BoxGeometry(h.w, wallH, h.d),
+      new THREE.MeshLambertMaterial({ color: new THREE.Color(h.wallColor) }));
+    walls.position.y = wallH / 2; walls.castShadow = true; walls.receiveShadow = true;
+    g.add(walls);
 
-  // Asphalt road strip down the corridor
-  const roadHalf = 4.5, rnear = -6, rfar = 200;
-  const rc = [
-    project(-roadHalf, 0.005, craft.pos[2] + rnear),
-    project(roadHalf, 0.005, craft.pos[2] + rnear),
-    project(roadHalf, 0.005, craft.pos[2] + rfar),
-    project(-roadHalf, 0.005, craft.pos[2] + rfar),
-  ];
-  if (rc.every(c => c)) drawPoly(rc, '#3a3f47', 1);
+    const roofH = Math.max(1.4, h.h - wallH);
+    const roof = new THREE.Mesh(
+      new THREE.ConeGeometry(Math.hypot(h.w, h.d) * 0.42, roofH, 4),
+      new THREE.MeshLambertMaterial({ color: new THREE.Color(h.roofColor) }));
+    roof.position.y = wallH + roofH / 2; roof.rotation.y = Math.PI / 4; roof.castShadow = true;
+    g.add(roof);
 
-  // Lane centerline dashes
-  ctx.strokeStyle = 'rgba(240, 225, 150, 0.7)';
-  ctx.lineWidth = 2;
-  for (let gz = Math.floor(craft.pos[2] / 6) * 6 - 12; gz <= craft.pos[2] + 180; gz += 6) {
-    const a = project(0, 0.01, gz);
-    const b = project(0, 0.01, gz + 3);
-    if (a && b) { ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke(); }
-  }
-
-  // Driveways
-  world.driveways.forEach(d => {
-    const p1 = project(d.x - d.w / 2, 0.008, d.z - d.l / 2);
-    const p2 = project(d.x + d.w / 2, 0.008, d.z - d.l / 2);
-    const p3 = project(d.x + d.w / 2, 0.008, d.z + d.l / 2);
-    const p4 = project(d.x - d.w / 2, 0.008, d.z + d.l / 2);
-    if ([p1, p2, p3, p4].every(p => p)) drawPoly([p1, p2, p3, p4], '#c9b8a8', 0.8);
-  });
-}
-
-// Flat ground shadow (a dark quad) beneath a footprint.
-function drawShadow(cx, cz, w, d) {
-  const p1 = project(cx - w / 2, 0.02, cz - d / 2);
-  const p2 = project(cx + w / 2, 0.02, cz - d / 2);
-  const p3 = project(cx + w / 2, 0.02, cz + d / 2);
-  const p4 = project(cx - w / 2, 0.02, cz + d / 2);
-  if ([p1, p2, p3, p4].every(p => p)) drawPoly([p1, p2, p3, p4], 'rgba(0,0,0,0.22)', 0.5);
-}
-
-function drawHouse(h) {
-  const x1 = h.x - h.w / 2, x2 = h.x + h.w / 2;
-  const z1 = h.z - h.d / 2, z2 = h.z + h.d / 2;
-  const wallH = h.h * 0.72;
-
-  drawShadow(h.x + (h.x < 0 ? 1 : -1), h.z + 1, h.w + 1.5, h.d + 1.5);
-
-  // Determine which side wall faces the craft for shading realism.
-  const facingSide = craft.pos[0] < h.x ? -1 : 1; // -1 -> show left (x1) wall
-
-  // Side wall (the one facing the camera)
-  const sx = facingSide < 0 ? x1 : x2;
-  const sw = [
-    project(sx, 0, z1), project(sx, 0, z2),
-    project(sx, wallH, z2), project(sx, wallH, z1),
-  ];
-  if (sw.every(p => p)) {
-    const depth = (sw[0].depth + sw[1].depth) / 2;
-    drawPoly(sw, shade(h.wallColor, 0.82), Math.max(0.25, fogAlpha(depth)));
-  }
-
-  // Front wall (toward the street, lower z) with windows + door
-  const fw = [
-    project(x1, 0, z1), project(x2, 0, z1),
-    project(x2, wallH, z1), project(x1, wallH, z1),
-  ];
-  if (fw.every(p => p)) {
-    const depth = (fw[0].depth + fw[1].depth) / 2;
-    const a = Math.max(0.3, fogAlpha(depth));
-    drawPoly(fw, h.wallColor, a);
-    // Windows (two upper) + door
-    const winY0 = wallH * 0.45, winY1 = wallH * 0.72;
-    [[x1 + h.w * 0.2, x1 + h.w * 0.38], [x2 - h.w * 0.38, x2 - h.w * 0.2]].forEach(([wx0, wx1]) => {
-      const wp = [project(wx0, winY0, z1 - 0.05), project(wx1, winY0, z1 - 0.05),
-                  project(wx1, winY1, z1 - 0.05), project(wx0, winY1, z1 - 0.05)];
-      if (wp.every(p => p)) drawPoly(wp, '#3d5a70', a * 0.9);
+    // Front face (toward the street = lower z) gets a door + two windows.
+    const front = h.z < 0 ? h.d / 2 : -h.d / 2; // local, mapped below via group
+    const winMat = new THREE.MeshLambertMaterial({ color: 0x2f4a5e });
+    const doorMat = new THREE.MeshLambertMaterial({ color: 0x5a3d2c });
+    const zface = -h.d / 2 - 0.02; // street-facing side after Z-map
+    [[-h.w * 0.26, wallH * 0.58], [h.w * 0.26, wallH * 0.58]].forEach(([wx, wy]) => {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(h.w * 0.22, wallH * 0.26, 0.1), winMat);
+      win.position.set(wx, wy, zface); g.add(win);
     });
-    const dp = [project(h.x - 0.8, 0, z1 - 0.05), project(h.x + 0.8, 0, z1 - 0.05),
-                project(h.x + 0.8, wallH * 0.4, z1 - 0.05), project(h.x - 0.8, wallH * 0.4, z1 - 0.05)];
-    if (dp.every(p => p)) drawPoly(dp, '#5a3d2c', a);
-  }
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.5, wallH * 0.4, 0.1), doorMat);
+    door.position.set(0, wallH * 0.2, zface); g.add(door);
 
-  // Hip roof (ridge line raised above eaves)
-  const ridgeY = h.h, eaveY = wallH;
-  const roofFront = [
-    project(x1, eaveY, z1), project(x2, eaveY, z1),
-    project(h.x, ridgeY, (z1 + z2) / 2),
-  ];
-  const roofSide = [
-    project(sx, eaveY, z1), project(sx, eaveY, z2),
-    project(h.x, ridgeY, (z1 + z2) / 2),
-  ];
-  if (roofFront.every(p => p)) {
-    const depth = roofFront[0].depth;
-    drawPoly(roofFront, h.roofColor, Math.max(0.25, fogAlpha(depth)));
-  }
-  if (roofSide.every(p => p)) {
-    const depth = roofSide[0].depth;
-    drawPoly(roofSide, shade(h.roofColor, 0.8), Math.max(0.22, fogAlpha(depth)));
-  }
-}
-
-function drawPalm(p) {
-  const base = project(p.x, 0, p.z);
-  if (!base) return null;
-  const trunkTop = project(p.x + p.lean * 0.3, p.h * 0.4, p.z);
-  const crown = project(p.x + p.lean * 0.6, p.h, p.z);
-  if (!trunkTop || !crown) return null;
-  return { base, trunkTop, crown, p, depth: base.depth };
-}
-
-function paintPalm(pp) {
-  const alpha = Math.max(0.2, fogAlpha(pp.depth));
-  drawShadow(pp.p.x, pp.p.z, 3, 3);
-  const trunkW = Math.max(0.8, 40 / pp.depth * 0.4);
-  ctx.globalAlpha = alpha;
-  ctx.strokeStyle = '#6b5d4a';
-  ctx.lineWidth = trunkW;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(pp.base.sx, pp.base.sy);
-  ctx.lineTo(pp.trunkTop.sx, pp.trunkTop.sy);
-  ctx.lineTo(pp.crown.sx, pp.crown.sy);
-  ctx.stroke();
-
-  const frondR = Math.max(6, (H / pp.depth) * pp.p.h * 0.35);
-  // Radiating fronds
-  ctx.strokeStyle = '#3d7a4a';
-  ctx.lineWidth = Math.max(1.5, trunkW * 0.6);
-  for (let i = 0; i < 7; i++) {
-    const ang = (i / 7) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.moveTo(pp.crown.sx, pp.crown.sy);
-    ctx.lineTo(pp.crown.sx + Math.cos(ang) * frondR, pp.crown.sy + Math.sin(ang) * frondR * 0.7);
-    ctx.stroke();
-  }
-  const grad = ctx.createRadialGradient(
-    pp.crown.sx - frondR * 0.3, pp.crown.sy - frondR * 0.3, frondR * 0.1,
-    pp.crown.sx, pp.crown.sy, frondR * 0.6
-  );
-  grad.addColorStop(0, '#6fb566');
-  grad.addColorStop(1, '#3d7a4a');
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(pp.crown.sx, pp.crown.sy, frondR * 0.55, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-}
-
-function drawPool(pool) {
-  const p1 = project(pool.x - pool.w / 2, 0.02, pool.z - pool.l / 2);
-  const p2 = project(pool.x + pool.w / 2, 0.02, pool.z - pool.l / 2);
-  const p3 = project(pool.x + pool.w / 2, 0.02, pool.z + pool.l / 2);
-  const p4 = project(pool.x - pool.w / 2, 0.02, pool.z + pool.l / 2);
-  if ([p1, p2, p3, p4].every(p => p)) {
-    const depth = (p1.depth + p2.depth) / 2;
-    drawPoly([p1, p2, p3, p4], '#2a7fb8', Math.max(0.35, fogAlpha(depth) * 0.92));
-  }
-}
-
-function drawWall(w) {
-  const p1 = project(w.x - w.w / 2, 0, w.z);
-  const p2 = project(w.x + w.w / 2, 0, w.z);
-  const p3 = project(w.x + w.w / 2, w.h, w.z);
-  const p4 = project(w.x - w.w / 2, w.h, w.z);
-  if ([p1, p2, p3, p4].every(p => p)) {
-    const depth = (p1.depth + p2.depth) / 2;
-    drawPoly([p1, p2, p3, p4], '#b0a080', Math.max(0.25, fogAlpha(depth)));
-  }
-}
-
-function paintGate(g) {
-  const segments = 20;
-  const pts = [];
-  for (let i = 0; i <= segments; i++) {
-    const a = (i / segments) * Math.PI * 2;
-    const px = g.x + Math.cos(a) * g.r;
-    const py = g.y + Math.sin(a) * g.r;
-    const p = project(px, py, g.z);
-    if (p) pts.push(p);
-  }
-  if (pts.length < segments) return;
-  const depth = pts[0].depth;
-  const alpha = Math.max(0.25, fogAlpha(depth));
-  ctx.globalAlpha = alpha;
-  // Outer glow ring
-  ctx.strokeStyle = g.passed ? 'rgba(57,255,106,0.35)' : 'rgba(240,193,104,0.35)';
-  ctx.lineWidth = Math.max(6, 320 / depth);
-  ctx.beginPath();
-  ctx.moveTo(pts[0].sx, pts[0].sy);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].sx, pts[i].sy);
-  ctx.stroke();
-  // Core ring
-  ctx.strokeStyle = g.passed ? '#39ff6a' : '#f0c168';
-  ctx.lineWidth = Math.max(2, 160 / depth);
-  ctx.beginPath();
-  ctx.moveTo(pts[0].sx, pts[0].sy);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].sx, pts[i].sy);
-  ctx.stroke();
-  ctx.globalAlpha = 1;
-}
-
-// FPV frame prop arcs in the lower corners — sells the "onboard camera" feel.
-function drawFrameOverlay() {
-  const spin = (performance.now() / 60) % (Math.PI * 2);
-  const props = [
-    [W * 0.16, H * 0.9], [W * 0.84, H * 0.9],
-  ];
-  ctx.save();
-  props.forEach(([cx, cy]) => {
-    ctx.globalAlpha = 0.14;
-    ctx.strokeStyle = '#0a0c10';
-    ctx.lineWidth = 3;
-    for (let b = 0; b < 3; b++) {
-      const a = spin + (b / 3) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, 60, 14, a, 0, Math.PI * 2);
-      ctx.stroke();
-    }
+    g.position.set(h.x, 0, MZ(h.z));
+    scene.add(g);
   });
-  ctx.restore();
-}
 
-// Subtle speed vignette that intensifies with velocity.
-function drawVignette() {
-  const speed = Math.hypot(craft.vel[0], craft.vel[1], craft.vel[2]);
-  const intensity = Math.min(0.5, speed / 45);
-  if (intensity < 0.02) return;
-  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.max(W, H) * 0.7);
-  vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, `rgba(0,0,0,${intensity})`);
-  ctx.fillStyle = vg;
-  ctx.fillRect(0, 0, W, H);
+  // Palms: leaning trunk + chunky flat-shaded canopy
+  world.palms.forEach(p => {
+    const g = new THREE.Group();
+    const th = p.h;
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.14, 0.26, th, 6),
+      new THREE.MeshLambertMaterial({ color: 0x7a6a4a }));
+    trunk.position.y = th / 2; trunk.rotation.z = p.lean; trunk.castShadow = true;
+    g.add(trunk);
+    const canopy = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(1.9, 0),
+      new THREE.MeshLambertMaterial({ color: 0x3f8a4b, flatShading: true }));
+    canopy.position.set(p.lean * th * 0.5, th + 0.1, 0);
+    canopy.scale.set(1.5, 0.85, 1.5); canopy.castShadow = true;
+    g.add(canopy);
+    g.position.set(p.x, 0, MZ(p.z));
+    scene.add(g);
+  });
+
+  // Pools
+  world.pools.forEach(pool => {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(pool.w, pool.l),
+      new THREE.MeshLambertMaterial({ color: 0x2a7fb8 }));
+    m.rotation.x = -Math.PI / 2; m.position.set(pool.x, 0.05, MZ(pool.z));
+    m.receiveShadow = true; scene.add(m);
+  });
+
+  // Low garden walls
+  world.walls.forEach(w => {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(w.w, w.h, 0.35),
+      new THREE.MeshLambertMaterial({ color: 0xb0a080 }));
+    m.position.set(w.x, w.h / 2, MZ(w.z)); m.castShadow = true; m.receiveShadow = true;
+    scene.add(m);
+  });
+
+  // Gates: glowing torus rings facing down the corridor
+  world.gates.forEach(g => {
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xf0c168, emissive: 0xd9a441, emissiveIntensity: 0.7,
+      metalness: 0.3, roughness: 0.4 });
+    const m = new THREE.Mesh(new THREE.TorusGeometry(g.r, 0.14, 12, 32), mat);
+    m.position.set(g.x, g.y, MZ(g.z)); m.castShadow = true;
+    g.mesh = m; scene.add(m);
+  });
 }
 
 function renderWorld() {
-  drawGround();
+  if (!ready3d) return;
 
-  world.pools.forEach(drawPool);
-  world.walls.forEach(drawWall);
+  // Camera basis in the body frame: forward tilts UP by camAngle (FPV uptilt).
+  const a = config.camAngle * Math.PI / 180;
+  const fwd = quatRotate(craft.q, 0, Math.sin(a),  Math.cos(a));
+  const up  = quatRotate(craft.q, 0, Math.cos(a), -Math.sin(a));
 
-  // Painter's algorithm: draw farther objects first.
-  const drawables = [];
-  world.houses.forEach(h => { const p = project(h.x, 0, h.z); if (p) drawables.push({ type: 'house', depth: p.depth, data: h }); });
-  world.palms.forEach(p => { const pp = drawPalm(p); if (pp) drawables.push({ type: 'palm', depth: pp.depth, data: pp }); });
+  camera3.position.set(craft.pos[0], craft.pos[1], MZ(craft.pos[2]));
+  camera3.up.set(up[0], up[1], MZ(up[2]));
+  camera3.lookAt(craft.pos[0] + fwd[0], craft.pos[1] + fwd[1], MZ(craft.pos[2] + fwd[2]));
 
-  drawables.sort((a, b) => b.depth - a.depth);
-  drawables.forEach(d => {
-    if (d.type === 'house') drawHouse(d.data);
-    else if (d.type === 'palm') paintPalm(d.data);
+  if (camera3.fov !== config.camFov) { camera3.fov = config.camFov; camera3.updateProjectionMatrix(); }
+
+  // Recolor gates by passed state.
+  world.gates.forEach(g => {
+    if (!g.mesh) return;
+    g.mesh.material.color.setHex(g.passed ? 0x39ff6a : 0xf0c168);
+    g.mesh.material.emissive.setHex(g.passed ? 0x1f8f3a : 0xd9a441);
   });
 
-  world.gates.forEach(paintGate);
-
-  drawVignette();
-  drawFrameOverlay();
+  renderer.render(scene, camera3);
 }
 
 /* =========================================================
    INIT
    ========================================================= */
 window.onload = () => {
-  canvas = document.getElementById('canvas');
-  ctx = canvas.getContext('2d');
-  resizeCanvas();
+  buildNeighborhood();
+  initRenderer();
   window.addEventListener('resize', resizeCanvas);
 
-  buildNeighborhood();
   setupSticks();
   setupMenu();
   updateRotateBanner();
@@ -1321,8 +1102,10 @@ window.onload = () => {
 };
 
 function resizeCanvas() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  if (renderer) renderer.setSize(W, H, false);
+  if (camera3) { camera3.aspect = W / H; camera3.updateProjectionMatrix(); }
 }
 
 function updateRotateBanner() {
