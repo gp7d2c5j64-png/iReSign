@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FPV Sim — Auto Demo</title>
+<style>
+/* =========================================================
+   PURE-CSS FPV FLYTHROUGH (no JavaScript)
+   Built so it runs in sandboxed HTML preview panels that block
+   scripts. It auto-flies a loop down the neighborhood using CSS
+   3D transforms + keyframes. The full *playable* sim is
+   index.html / fpv-sim.html and needs a real browser.
+   ========================================================= */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden;
+  background: #0a0c10; font-family: 'Share Tech Mono', monospace; }
+
+.viewport {
+  position: fixed; inset: 0;
+  perspective: 600px;
+  perspective-origin: 50% 42%;
+  overflow: hidden;
+  background: linear-gradient(#4a90d9 0%, #87ceeb 45%, #e0f6ff 62%, #7f9166 62%, #5f7a4a 100%);
+}
+
+/* Sun */
+.sun {
+  position: absolute; top: 14%; left: 26%;
+  width: 90px; height: 90px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,250,220,0.95) 0%, rgba(255,240,190,0.35) 45%, rgba(255,240,190,0) 72%);
+  animation: sunDrift 16s ease-in-out infinite alternate;
+}
+@keyframes sunDrift { from { transform: translateX(0); } to { transform: translateX(60px); } }
+
+/* Road: a plane laid flat with scrolling lane dashes */
+.road {
+  position: absolute; left: 50%; top: 62%;
+  width: 300px; height: 2600px;
+  margin-left: -150px;
+  transform: rotateX(80deg) translateZ(-40px);
+  transform-origin: top center;
+  background:
+    linear-gradient(#3a3f47, #3a3f47) center/70px 100% no-repeat,
+    repeating-linear-gradient(#3a3f47 0 60px, transparent 60px 120px) center/8px 100% no-repeat,
+    #5f7a4a;
+  animation: roadMove 2.2s linear infinite;
+}
+@keyframes roadMove { from { background-position-y: 0, 0, 0; } to { background-position-y: 0, 120px, 0; } }
+
+/* 3D world that holds the oncoming objects */
+.world { position: absolute; inset: 0; transform-style: preserve-3d; }
+
+.obj {
+  position: absolute; left: 50%; top: 50%;
+  transform-style: preserve-3d;
+  animation: approach 6s linear infinite;
+}
+/* Objects stream from far (-1700px) toward the camera and fade out */
+@keyframes approach {
+  0%   { transform: translate3d(var(--x), var(--y), -1700px); opacity: 0; }
+  8%   { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { transform: translate3d(var(--x), var(--y), 260px); opacity: 0; }
+}
+
+/* Houses — simple two-tone boxes with a roof */
+.house { margin: -70px 0 0 -55px; width: 110px; height: 90px; }
+.house .wall { width: 110px; height: 66px; margin-top: 24px;
+  background: var(--wall); box-shadow: inset -22px 0 rgba(0,0,0,0.18); }
+.house .roof { position: absolute; top: 0; left: -6px;
+  width: 0; height: 0; border-left: 61px solid transparent; border-right: 61px solid transparent;
+  border-bottom: 26px solid var(--roof); }
+.house .win { position: absolute; width: 18px; height: 16px; background: #3d5a70; top: 40px; }
+.house .win.a { left: 20px; } .house .win.b { right: 20px; }
+.house .door { position: absolute; width: 18px; height: 26px; background: #5a3d2c; bottom: 0; left: 46px; }
+
+/* Palms */
+.palm { margin: -110px 0 0 -6px; width: 12px; height: 120px; }
+.palm .trunk { width: 8px; height: 96px; margin: 24px auto 0;
+  background: linear-gradient(#7a6a52, #6b5d4a); border-radius: 4px; }
+.palm .crown { position: absolute; top: 0; left: 50%; width: 70px; height: 46px; margin-left: -35px;
+  background: radial-gradient(circle at 40% 35%, #6fb566, #3d7a4a 70%); border-radius: 50%; }
+
+/* Gates — glowing rings the camera flies through */
+.gate { margin: -70px 0 0 -70px; width: 140px; height: 140px; border-radius: 50%;
+  border: 10px solid var(--ring, #f0c168);
+  box-shadow: 0 0 26px var(--ring, #f0c168), inset 0 0 22px rgba(240,193,104,0.35); }
+.gate.g { --ring: #39ff6a; }
+
+/* ===== HUD overlay (static, sits above the 3D scene) ===== */
+.hud { position: fixed; inset: 0; pointer-events: none; z-index: 20;
+  font-family: 'Share Tech Mono', monospace; }
+.crosshair { position: absolute; top: 50%; left: 50%; width: 22px; height: 22px;
+  margin: -11px 0 0 -11px; border: 1px solid #39ff6a; border-radius: 50%; opacity: 0.7; }
+.crosshair::before { content:''; position:absolute; left:50%; top:-9px; width:1px; height:9px;
+  background:#39ff6a; transform:translateX(-50%); }
+.tl { position: absolute; top: 16px; left: 16px; color: #39ff6a; font-size: 12px;
+  text-shadow: 0 0 8px rgba(57,255,106,0.5); line-height: 1.7; }
+.badge { display:inline-block; background: rgba(57,255,106,0.2); border:1px solid #39ff6a;
+  color:#39ff6a; padding:3px 8px; border-radius:3px; animation: blink 2s steps(1) infinite; }
+@keyframes blink { 0%,80%{opacity:1;} 90%{opacity:0.35;} 100%{opacity:1;} }
+.bar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: rgba(20,23,29,0.7); border:1px solid #2c313b; color:#39ff6a;
+  font-size: 11px; padding: 7px 14px; border-radius: 4px; white-space: nowrap; }
+.title-chip { position: absolute; top: 16px; right: 16px; text-align: right;
+  color:#f0c168; font-size: 12px; }
+.title-chip small { color:#8d96a6; display:block; font-size:10px; margin-top:3px; }
+
+/* On-screen sticks (decorative — show the layout) */
+.stick { position: fixed; bottom: 26px; width: 96px; height: 96px; border-radius: 50%;
+  border: 2px solid #5b6577;
+  background: radial-gradient(circle at 30% 30%, rgba(100,120,150,0.25), rgba(20,23,29,0.55));
+  z-index: 20; }
+.stick.left { left: 26px; } .stick.right { right: 26px; }
+.stick .knob { position: absolute; width: 40px; height: 40px; left: 50%; top: 50%;
+  margin: -20px 0 0 -20px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #f0c168, #d9a441); box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+.stick.left .knob { animation: wiggleL 4s ease-in-out infinite; }
+.stick.right .knob { animation: wiggleR 3.3s ease-in-out infinite; }
+@keyframes wiggleL { 0%,100%{transform:translate(0,6px);} 50%{transform:translate(-10px,-2px);} }
+@keyframes wiggleR { 0%,100%{transform:translate(0,0);} 25%{transform:translate(9px,-6px);} 75%{transform:translate(-8px,7px);} }
+
+.note { position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
+  background: rgba(217,164,65,0.92); color:#0a0c10; text-align:center;
+  font-size: 11px; padding: 5px; letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<div class="viewport">
+  <div class="sun"></div>
+  <div class="road"></div>
+  <div class="world">
+    <!-- Gates down the centre -->
+    <div class="obj gate"   style="--x:-10px; --y:-30px; animation-delay:-0.0s;"></div>
+    <div class="obj gate g" style="--x:14px;  --y:-46px; animation-delay:-1.0s;"></div>
+    <div class="obj gate"   style="--x:-18px; --y:-40px; animation-delay:-2.0s;"></div>
+    <div class="obj gate"   style="--x:8px;   --y:-52px; animation-delay:-3.0s;"></div>
+    <div class="obj gate g" style="--x:-6px;  --y:-36px; animation-delay:-4.0s;"></div>
+    <div class="obj gate"   style="--x:16px;  --y:-44px; animation-delay:-5.0s;"></div>
+
+    <!-- Houses lining both sides -->
+    <div class="obj house" style="--x:-230px; --y:-6px; --wall:#d8c9a8; --roof:#a8462f; animation-delay:-0.4s;">
+      <div class="roof"></div><div class="wall"></div><div class="win a"></div><div class="win b"></div><div class="door"></div></div>
+    <div class="obj house" style="--x:230px; --y:-6px; --wall:#e3dcc8; --roof:#8a3d2c; animation-delay:-1.4s;">
+      <div class="roof"></div><div class="wall"></div><div class="win a"></div><div class="win b"></div><div class="door"></div></div>
+    <div class="obj house" style="--x:-250px; --y:-10px; --wall:#c9b89a; --roof:#b8562f; animation-delay:-2.6s;">
+      <div class="roof"></div><div class="wall"></div><div class="win a"></div><div class="win b"></div><div class="door"></div></div>
+    <div class="obj house" style="--x:250px; --y:-10px; --wall:#d8c9a8; --roof:#8a3d2c; animation-delay:-3.6s;">
+      <div class="roof"></div><div class="wall"></div><div class="win a"></div><div class="win b"></div><div class="door"></div></div>
+    <div class="obj house" style="--x:-235px; --y:-6px; --wall:#e3dcc8; --roof:#a8462f; animation-delay:-4.8s;">
+      <div class="roof"></div><div class="wall"></div><div class="win a"></div><div class="win b"></div><div class="door"></div></div>
+
+    <!-- Palms -->
+    <div class="obj palm" style="--x:-140px; --y:-8px; animation-delay:-0.8s;"><div class="crown"></div><div class="trunk"></div></div>
+    <div class="obj palm" style="--x:150px; --y:-8px; animation-delay:-2.2s;"><div class="crown"></div><div class="trunk"></div></div>
+    <div class="obj palm" style="--x:-150px; --y:-8px; animation-delay:-3.4s;"><div class="crown"></div><div class="trunk"></div></div>
+    <div class="obj palm" style="--x:145px; --y:-8px; animation-delay:-4.6s;"><div class="crown"></div><div class="trunk"></div></div>
+  </div>
+</div>
+
+<!-- HUD -->
+<div class="hud">
+  <div class="crosshair"></div>
+  <div class="tl">
+    <div class="badge">ARMED</div>
+    <div>ALT: 3.4m</div>
+    <div>SPD: 62km/h</div>
+    <div>GATES: 4/6</div>
+  </div>
+  <div class="title-chip">FPV FLIGHT SIM<small>auto demo</small></div>
+  <div class="bar">TIMER 00:47 · BAT 15.9V · ACRO MODE</div>
+</div>
+<div class="stick left"><div class="knob"></div></div>
+<div class="stick right"><div class="knob"></div></div>
+
+<div class="note">▶ Auto-demo (no controls). The fully playable sim is index.html — open it in a real browser.</div>
+</body>
+</html>
