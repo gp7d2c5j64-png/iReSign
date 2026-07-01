@@ -800,11 +800,49 @@ const SPAWN_POS = [0, 0.6, -14];
 const craft = {
   pos: SPAWN_POS.slice(),  // x, y(alt), z along the street corridor
   vel: [0, 0, 0],
-  ang: [0, 0, 0],          // roll, yaw, pitch (radians)
+  // Orientation as a quaternion [w,x,y,z] (body->world). Acro rate control
+  // integrates body-frame angular velocity into this quaternion, which is what
+  // makes coordinated turns/flips behave correctly (Euler angles cannot).
+  q: [1, 0, 0, 0],
   mass: 0.65,
   // Thrust-to-weight ~2.9:1 for a freestyle 5" — hover sits near ~35% throttle.
   maxThrust: 18.5,
 };
+
+/* ---- Quaternion helpers (q = [w,x,y,z], body->world, kept normalized) ---- */
+function quatMul(a, b) {
+  return [
+    a[0]*b[0] - a[1]*b[1] - a[2]*b[2] - a[3]*b[3],
+    a[0]*b[1] + a[1]*b[0] + a[2]*b[3] - a[3]*b[2],
+    a[0]*b[2] - a[1]*b[3] + a[2]*b[0] + a[3]*b[1],
+    a[0]*b[3] + a[1]*b[2] - a[2]*b[1] + a[3]*b[0],
+  ];
+}
+function quatNormalize(q) {
+  const n = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+  return [q[0]/n, q[1]/n, q[2]/n, q[3]/n];
+}
+// Rotate vector v by quaternion q (body->world). Pass the conjugate for world->body.
+function quatRotate(q, vx, vy, vz) {
+  const w = q[0], x = q[1], y = q[2], z = q[3];
+  const tx = 2 * (y*vz - z*vy);
+  const ty = 2 * (z*vx - x*vz);
+  const tz = 2 * (x*vy - y*vx);
+  return [
+    vx + w*tx + (y*tz - z*ty),
+    vy + w*ty + (z*tx - x*tz),
+    vz + w*tz + (x*ty - y*tx),
+  ];
+}
+// Advance orientation by a body-frame angular-velocity vector (rad/s) over dt.
+function integrateBodyRates(q, ox, oy, oz, dt) {
+  const mag = Math.hypot(ox, oy, oz);
+  if (mag < 1e-8) return q;
+  const half = mag * dt / 2;
+  const s = Math.sin(half) / mag;      // axis * sin(half) == omega * s
+  const dq = [Math.cos(half), ox*s, oy*s, oz*s];
+  return quatNormalize(quatMul(q, dq)); // right-multiply: rates are in body frame
+}
 
 const phys = {
   gravity: 9.81,
@@ -874,39 +912,32 @@ function buildNeighborhood() {
 
 /* =========================================================
    3D → 2D PROJECTION
-   Perspective camera following the craft pose (yaw, roll, then
-   pitch + fixed FPV cam tilt). Returns null for points behind
-   the camera.
+   Perspective camera locked to the craft's full orientation quaternion,
+   then a fixed FPV cam up-tilt. Returns null for points behind the camera.
    ========================================================= */
 let canvas, ctx, W, H, lastTime = performance.now();
 
 function project(px, py, pz) {
-  let x = px - craft.pos[0];
-  let y = py - craft.pos[1];
-  let z = pz - craft.pos[2];
+  // World offset from the craft.
+  const dx = px - craft.pos[0];
+  const dy = py - craft.pos[1];
+  const dz = pz - craft.pos[2];
 
-  // Undo craft yaw
-  const yaw = craft.ang[1];
-  const cosY = Math.cos(-yaw), sinY = Math.sin(-yaw);
-  let x1 = x * cosY - z * sinY;
-  let z1 = x * sinY + z * cosY;
+  // World -> body frame using the conjugate of the orientation quaternion.
+  const qc = [craft.q[0], -craft.q[1], -craft.q[2], -craft.q[3]];
+  const b = quatRotate(qc, dx, dy, dz);
+  const xb = b[0], yb = b[1], zb = b[2];
 
-  // Undo craft roll
-  const roll = craft.ang[0];
-  const cosR = Math.cos(-roll), sinR = Math.sin(-roll);
-  let x2 = x1 * cosR - y * sinR;
-  let y2 = x1 * sinR + y * cosR;
-
-  // Camera pitch = craft pitch + fixed FPV cam tilt
-  const camTilt = craft.ang[2] + (config.camAngle * Math.PI / 180);
+  // Fixed FPV camera up-tilt (rotate about the body X/right axis).
+  const camTilt = config.camAngle * Math.PI / 180;
   const cosP = Math.cos(-camTilt), sinP = Math.sin(-camTilt);
-  let y3 = y2 * cosP - z1 * sinP;
-  let z3 = y2 * sinP + z1 * cosP;
+  const y3 = yb * cosP - zb * sinP;
+  const z3 = yb * sinP + zb * cosP;
 
   if (z3 <= 0.05) return null; // behind camera
 
   const f = (H / 2) / Math.tan((config.camFov * Math.PI / 180) / 2);
-  const sx = W / 2 + (x2 * f) / z3;
+  const sx = W / 2 + (xb * f) / z3;
   const sy = H / 2 - (y3 * f) / z3;
   return { sx, sy, depth: z3 };
 }
@@ -1320,7 +1351,7 @@ function startFlight() {
   world.gates.forEach(g => g.passed = false);
   craft.pos = SPAWN_POS.slice();
   craft.vel = [0, 0, 0];
-  craft.ang = [0, 0, 0];
+  craft.q = [1, 0, 0, 0];
   input.throttle = 0;
   sticks.left.id = null; sticks.left.rawX = 0; sticks.left.rawY = 0; sticks.left.kbActive = false;
   sticks.right.id = null; sticks.right.rawX = 0; sticks.right.rawY = 0; sticks.right.kbActive = false;
@@ -1380,7 +1411,7 @@ function updateGatesUI() {
 function resetCraft() {
   craft.pos = SPAWN_POS.slice();
   craft.vel = [0, 0, 0];
-  craft.ang = [0, 0, 0];
+  craft.q = [1, 0, 0, 0];
   state.crashed = false;
   state.armed = false;
   state.leavingMapWarningSent = false;
@@ -1406,49 +1437,46 @@ function updatePhysics(dt) {
 
   applyKeyboard(dt);
 
-  // Read sticks (Mode 2): left = throttle(y, holds) + yaw(x, springs)
-  //                        right = pitch(y, springs) + roll(x, springs)
+  // Throttle (left stick Y) — read first so the arm interlock can see it.
   input.throttle = Math.max(0, sticks.left.rawY);
+
+  // DISARMED: motors are off and the quad is frozen in place — it does not
+  // drift, fall, or rotate until the pilot arms. (Prevents ghost movement.)
+  if (!state.armed) {
+    craft.vel[0] = craft.vel[1] = craft.vel[2] = 0;
+    return;
+  }
+
   const yawStick = applyDeadzone(sticks.left.rawX);
   const pitchStick = applyDeadzone(sticks.right.rawY);
   const rollStick = applyDeadzone(sticks.right.rawX);
 
-  // Acro rates: stick position -> angular RATE (deg/s -> rad/s). Zero stick
-  // means zero rate, so the quad holds whatever attitude it currently has.
-  const rollRate = rateResponse(rollStick, config.centerRP, config.rateRoll, config.expoRP) * Math.PI / 180;
-  const pitchRate = rateResponse(pitchStick, config.centerRP, config.ratePitch, config.expoRP) * Math.PI / 180;
-  const yawRate = rateResponse(yawStick, config.centerYaw, config.rateYaw, config.expoYaw) * Math.PI / 180;
+  // Acro rate control (WikiFPV): sticks command BODY-frame angular velocity
+  // (deg/s -> rad/s). Centered sticks => zero rate => the quad simply holds
+  // its current attitude — no self-leveling.
+  const rollRate  = rateResponse(rollStick,  config.centerRP,  config.rateRoll,  config.expoRP)  * Math.PI / 180;
+  const pitchRate = rateResponse(pitchStick, config.centerRP,  config.ratePitch, config.expoRP)  * Math.PI / 180;
+  const yawRate   = rateResponse(yawStick,   config.centerYaw, config.rateYaw,   config.expoYaw) * Math.PI / 180;
 
-  // Roll and yaw are inverted at the input so a right/right stick banks and
-  // yaws right (stick direction matches the resulting motion). Pitch already
-  // maps stick-forward -> fly-forward, so it integrates normally.
-  craft.ang[0] -= rollRate * dt;
-  craft.ang[1] -= yawRate * dt;
-  craft.ang[2] += pitchRate * dt;
-  // Keep yaw wrapped to avoid unbounded growth.
-  if (craft.ang[1] > Math.PI) craft.ang[1] -= Math.PI * 2;
-  if (craft.ang[1] < -Math.PI) craft.ang[1] += Math.PI * 2;
+  // Body angular velocity vector: x = pitch (right axis), y = yaw (up axis),
+  // z = roll (forward axis). Yaw-right turns right and stick-forward pitches
+  // nose-down to fly forward. Roll is inverted per pilot preference (flip the
+  // sign of this rollRate term to swap roll direction). Integrating these in
+  // the BODY frame is what lets banked pitch carve a coordinated turn.
+  craft.q = integrateBodyRates(craft.q, pitchRate, yawRate, rollRate, dt);
 
-  const roll = craft.ang[0], pitch = craft.ang[2], yaw = craft.ang[1];
-  const thrustMag = state.armed ? input.throttle * craft.maxThrust : 0;
-
-  // Body "up" (thrust) axis rotated into world space by a clean
-  // yaw * pitch * roll rotation of (0,1,0).
-  const sr = Math.sin(roll), cr = Math.cos(roll);
-  const sp = Math.sin(pitch), cp = Math.cos(pitch);
-  const sy = Math.sin(yaw), cy = Math.cos(yaw);
-  const upX = cy * (-sr) + sy * (sp * cr);
-  const upY = cp * cr;
-  const upZ = sy * sr + cy * (sp * cr);
+  // Thrust acts along the body "up" axis, rotated into world space by the quat.
+  const up = quatRotate(craft.q, 0, 1, 0);
+  const thrustMag = input.throttle * craft.maxThrust;
 
   // Quadratic air drag opposes velocity.
   const v = craft.vel;
   const speed = Math.hypot(v[0], v[1], v[2]);
   const dragF = phys.dragLin * speed;
 
-  const accelX = upX * thrustMag / craft.mass - v[0] * dragF;
-  const accelY = upY * thrustMag / craft.mass - phys.gravity - v[1] * dragF;
-  const accelZ = upZ * thrustMag / craft.mass - v[2] * dragF;
+  const accelX = up[0] * thrustMag / craft.mass - v[0] * dragF;
+  const accelY = up[1] * thrustMag / craft.mass - phys.gravity - v[1] * dragF;
+  const accelZ = up[2] * thrustMag / craft.mass - v[2] * dragF;
 
   v[0] += accelX * dt;
   v[1] += accelY * dt;
