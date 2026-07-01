@@ -620,13 +620,15 @@ const input = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
 
 /* =========================================================
    VIRTUAL STICKS
-   Unified Pointer Events (touch + mouse) tracked by pointerId,
-   plus a keyboard fallback. Left stick throttle holds; every
-   other axis springs back to center on release.
+   Raw touch + mouse events (plus a keyboard fallback). Left stick
+   throttle holds; every other axis springs back to center on release.
    ========================================================= */
+// Each stick tracks one active input: a touch identifier (number) or the
+// string 'mouse'. We use raw touch + mouse events (NOT Pointer Events /
+// setPointerCapture, which misbehave for on-screen sticks on mobile Safari).
 const sticks = {
-  left:  { pointerId: null, rawX: 0, rawY: 0, originX: 0, originY: 0, kbActive: false },
-  right: { pointerId: null, rawX: 0, rawY: 0, originX: 0, originY: 0, kbActive: false },
+  left:  { id: null, rawX: 0, rawY: 0, originX: 0, originY: 0, kbActive: false },
+  right: { id: null, rawX: 0, rawY: 0, originX: 0, originY: 0, kbActive: false },
 };
 const STICK_RADIUS_PX = 65; // matches .stick-container half-size minus knob margin
 
@@ -636,67 +638,86 @@ function applyDeadzone(v) {
   return Math.sign(v) * (Math.abs(v) - dz) / (1 - dz);
 }
 
+function beginStick(stickName, zoneEl, id, clientX, clientY) {
+  const s = sticks[stickName];
+  if (s.id !== null) return; // already tracking one input per stick
+  s.id = id;
+  // Read the actual on-screen center of the stick container so the origin
+  // always matches what the player sees regardless of CSS layout.
+  const crect = zoneEl.querySelector('.stick-container').getBoundingClientRect();
+  s.originX = crect.left + crect.width / 2;
+  s.originY = crect.top + crect.height / 2;
+  moveStick(stickName, clientX, clientY);
+}
+
+function moveStick(stickName, clientX, clientY) {
+  const s = sticks[stickName];
+  let dx = (clientX - s.originX) / (STICK_RADIUS_PX * config.stickSize);
+  let dy = (clientY - s.originY) / (STICK_RADIUS_PX * config.stickSize);
+  const len = Math.hypot(dx, dy);
+  if (len > 1) { dx /= len; dy /= len; }
+  s.rawX = dx;
+  s.rawY = -dy; // invert so up = positive
+}
+
+function endStick(stickName) {
+  const s = sticks[stickName];
+  s.id = null;
+  // Right stick + yaw axis of left stick spring back to center.
+  // Throttle (left stick Y) holds — real radios don't self-center throttle.
+  if (stickName === 'right') { s.rawX = 0; s.rawY = 0; }
+  else { s.rawX = 0; } // yaw springs back; rawY (throttle) intentionally held
+}
+
 function setupSticks() {
   const zoneLeft = document.getElementById('zone-left');
   const zoneRight = document.getElementById('zone-right');
+  const zones = [['left', zoneLeft], ['right', zoneRight]];
 
-  const beginPointer = (stickName, zoneEl, ev) => {
-    const s = sticks[stickName];
-    if (s.pointerId !== null) return; // already tracking one pointer per stick
-    s.pointerId = ev.pointerId;
-    // Read the actual on-screen center of the stick container so the origin
-    // always matches what the player sees regardless of CSS layout.
-    const containerEl = zoneEl.querySelector('.stick-container');
-    const crect = containerEl.getBoundingClientRect();
-    s.originX = crect.left + crect.width / 2;
-    s.originY = crect.top + crect.height / 2;
-    movePointer(stickName, ev);
-  };
+  // ---- Touch (primary on mobile) ----
+  zones.forEach(([name, zoneEl]) => {
+    zoneEl.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (sticks[name].id !== null) return;
+      const t = e.changedTouches[0];
+      beginStick(name, zoneEl, t.identifier, t.clientX, t.clientY);
+    }, { passive: false });
+  });
 
-  const movePointer = (stickName, ev) => {
-    const s = sticks[stickName];
-    let dx = (ev.clientX - s.originX) / (STICK_RADIUS_PX * config.stickSize);
-    let dy = (ev.clientY - s.originY) / (STICK_RADIUS_PX * config.stickSize);
-    const len = Math.hypot(dx, dy);
-    if (len > 1) { dx /= len; dy /= len; }
-    s.rawX = dx;
-    s.rawY = -dy; // invert so up = positive
-  };
+  document.addEventListener('touchmove', e => {
+    let handled = false;
+    for (const t of e.changedTouches) {
+      if (sticks.left.id === t.identifier)  { moveStick('left', t.clientX, t.clientY); handled = true; }
+      if (sticks.right.id === t.identifier) { moveStick('right', t.clientX, t.clientY); handled = true; }
+    }
+    if (handled) e.preventDefault();
+  }, { passive: false });
 
-  const endPointer = (stickName) => {
-    const s = sticks[stickName];
-    s.pointerId = null;
-    // Right stick + yaw axis of left stick spring back to center.
-    // Throttle (left stick Y) holds — real radios don't self-center throttle.
-    if (stickName === 'right') {
-      s.rawX = 0; s.rawY = 0;
-    } else {
-      s.rawX = 0; // yaw springs back; rawY (throttle) intentionally held
+  const onTouchEnd = e => {
+    for (const t of e.changedTouches) {
+      if (sticks.left.id === t.identifier)  endStick('left');
+      if (sticks.right.id === t.identifier) endStick('right');
     }
   };
+  document.addEventListener('touchend', onTouchEnd, { passive: false });
+  document.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
-  zoneLeft.addEventListener('pointerdown', ev => {
-    ev.preventDefault();
-    zoneLeft.setPointerCapture?.(ev.pointerId);
-    beginPointer('left', zoneLeft, ev);
+  // ---- Mouse (desktop) ----
+  zones.forEach(([name, zoneEl]) => {
+    zoneEl.addEventListener('mousedown', e => {
+      e.preventDefault();
+      if (sticks[name].id !== null) return;
+      beginStick(name, zoneEl, 'mouse', e.clientX, e.clientY);
+    });
   });
-  zoneRight.addEventListener('pointerdown', ev => {
-    ev.preventDefault();
-    zoneRight.setPointerCapture?.(ev.pointerId);
-    beginPointer('right', zoneRight, ev);
+  document.addEventListener('mousemove', e => {
+    if (sticks.left.id === 'mouse')  moveStick('left', e.clientX, e.clientY);
+    if (sticks.right.id === 'mouse') moveStick('right', e.clientX, e.clientY);
   });
-
-  document.addEventListener('pointermove', ev => {
-    if (sticks.left.pointerId === ev.pointerId) movePointer('left', ev);
-    if (sticks.right.pointerId === ev.pointerId) movePointer('right', ev);
+  document.addEventListener('mouseup', () => {
+    if (sticks.left.id === 'mouse')  endStick('left');
+    if (sticks.right.id === 'mouse') endStick('right');
   });
-
-  const onEnd = ev => {
-    if (sticks.left.pointerId === ev.pointerId) endPointer('left');
-    if (sticks.right.pointerId === ev.pointerId) endPointer('right');
-  };
-  document.addEventListener('pointerup', onEnd);
-  document.addEventListener('pointercancel', onEnd);
 
   setupKeyboard();
 }
@@ -719,7 +740,7 @@ function applyKeyboard(dt) {
   const L = sticks.left, R = sticks.right;
 
   // Left stick (throttle holds, yaw springs) — only if no finger/mouse on it.
-  if (L.pointerId === null) {
+  if (L.id === null) {
     let touched = false;
     if (keys['KeyW']) { L.rawY = Math.min(1, L.rawY + dt * 1.4); touched = true; }
     if (keys['KeyS']) { L.rawY = Math.max(0, L.rawY - dt * 1.4); touched = true; }
@@ -732,7 +753,7 @@ function applyKeyboard(dt) {
   }
 
   // Right stick (pitch + roll, both spring) — only if no finger/mouse on it.
-  if (R.pointerId === null) {
+  if (R.id === null) {
     let p = 0, r = 0, touched = false;
     if (keys['ArrowUp']) { p += 1; touched = true; }
     if (keys['ArrowDown']) { p -= 1; touched = true; }
@@ -744,7 +765,7 @@ function applyKeyboard(dt) {
 }
 
 function stickIsActive(s) {
-  return s.pointerId !== null || s.kbActive;
+  return s.id !== null || s.kbActive;
 }
 
 function renderSticks() {
@@ -1302,8 +1323,8 @@ function startFlight() {
   craft.vel = [0, 0, 0];
   craft.ang = [0, 0, 0];
   input.throttle = 0;
-  sticks.left.rawX = 0; sticks.left.rawY = 0; sticks.left.kbActive = false;
-  sticks.right.rawX = 0; sticks.right.rawY = 0; sticks.right.kbActive = false;
+  sticks.left.id = null; sticks.left.rawX = 0; sticks.left.rawY = 0; sticks.left.kbActive = false;
+  sticks.right.id = null; sticks.right.rawX = 0; sticks.right.rawY = 0; sticks.right.kbActive = false;
 
   document.getElementById('overlay').classList.add('hidden');
   document.getElementById('crash-overlay').classList.remove('show');
