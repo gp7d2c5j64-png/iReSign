@@ -843,6 +843,15 @@ function integrateBodyRates(q, ox, oy, oz, dt) {
   const dq = [Math.cos(half), ox*s, oy*s, oz*s];
   return quatNormalize(quatMul(q, dq)); // right-multiply: rates are in body frame
 }
+// Camera orientation = craft orientation with the ROLL (twist about the body
+// forward axis) inverted, so the horizon tilts opposite to the physical bank
+// per pilot preference. Yaw/pitch (the swing) are unchanged, so the camera
+// still points exactly where the quad points, and physics is untouched.
+function cameraQuat(q) {
+  const tw = quatNormalize([q[0], 0, 0, q[3]]);  // twist about forward (z)
+  const twInv = [tw[0], 0, 0, -tw[3]];           // inverse twist
+  return quatMul(q, quatMul(twInv, twInv));       // q * twist^-2 => roll flipped
+}
 
 const phys = {
   gravity: 9.81,
@@ -923,8 +932,10 @@ function project(px, py, pz) {
   const dy = py - craft.pos[1];
   const dz = pz - craft.pos[2];
 
-  // World -> body frame using the conjugate of the orientation quaternion.
-  const qc = [craft.q[0], -craft.q[1], -craft.q[2], -craft.q[3]];
+  // World -> camera frame using the conjugate of the camera quaternion
+  // (craft orientation with visual roll inverted; physics still uses craft.q).
+  const qcam = cameraQuat(craft.q);
+  const qc = [qcam[0], -qcam[1], -qcam[2], -qcam[3]];
   const b = quatRotate(qc, dx, dy, dz);
   const xb = b[0], yb = b[1], zb = b[2];
 
