@@ -238,8 +238,8 @@ button.secondary {
 .stick-zone {
   position: absolute;
   bottom: 0;
-  width: 42%;
-  height: 230px;
+  width: 46%;
+  height: 340px;
   pointer-events: auto;
   touch-action: none;
 }
@@ -248,8 +248,8 @@ button.secondary {
 
 .stick-container {
   position: absolute;
-  width: 150px;
-  height: 150px;
+  width: 300px;
+  height: 300px;
   left: 50%;
   bottom: 30px;
   transform: translateX(-50%);
@@ -258,7 +258,7 @@ button.secondary {
 
 .stick-label {
   position: absolute;
-  top: -18px;
+  top: -26px;
   left: 0;
   right: 0;
   text-align: center;
@@ -278,17 +278,17 @@ button.secondary {
 .stick-bg::before {
   content: '';
   position: absolute;
-  inset: 20px;
+  inset: 40px;
   border-radius: 50%;
   border: 1px dashed rgba(255,255,255,0.12);
 }
 .stick-knob {
   position: absolute;
-  width: 56px;
-  height: 56px;
+  width: 112px;
+  height: 112px;
   left: 50%;
   top: 50%;
-  margin: -28px 0 0 -28px;
+  margin: -56px 0 0 -56px;
   border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #f0c168, #d9a441);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
@@ -630,7 +630,7 @@ const sticks = {
   left:  { id: null, rawX: 0, rawY: 0, originX: 0, originY: 0, kbActive: false },
   right: { id: null, rawX: 0, rawY: 0, originX: 0, originY: 0, kbActive: false },
 };
-const STICK_RADIUS_PX = 65; // matches .stick-container half-size minus knob margin
+const STICK_RADIUS_PX = 130; // matches .stick-container half-size minus knob margin (2x)
 
 function applyDeadzone(v) {
   const dz = config.stickDeadzone;
@@ -926,8 +926,8 @@ function buildNeighborhood() {
    ========================================================= */
 let canvas, ctx, W, H, lastTime = performance.now();
 
-function project(px, py, pz) {
-  // World offset from the craft.
+// World point -> camera space [x, y, z] (no perspective divide yet).
+function camSpace(px, py, pz) {
   const dx = px - craft.pos[0];
   const dy = py - craft.pos[1];
   const dz = pz - craft.pos[2];
@@ -942,15 +942,39 @@ function project(px, py, pz) {
   // Fixed FPV camera up-tilt (rotate about the body X/right axis).
   const camTilt = config.camAngle * Math.PI / 180;
   const cosP = Math.cos(-camTilt), sinP = Math.sin(-camTilt);
-  const y3 = yb * cosP - zb * sinP;
-  const z3 = yb * sinP + zb * cosP;
-
-  if (z3 <= 0.05) return null; // behind camera
-
+  return [xb, yb * cosP - zb * sinP, yb * sinP + zb * cosP];
+}
+const NEAR_EPS = 0.05;
+function projectCam(c) {
+  if (c[2] <= NEAR_EPS) return null; // behind camera
   const f = (H / 2) / Math.tan((config.camFov * Math.PI / 180) / 2);
-  const sx = W / 2 + (xb * f) / z3;
-  const sy = H / 2 - (y3 * f) / z3;
-  return { sx, sy, depth: z3 };
+  return { sx: W / 2 + (c[0] * f) / c[2], sy: H / 2 - (c[1] * f) / c[2], depth: c[2] };
+}
+function project(px, py, pz) { return projectCam(camSpace(px, py, pz)); }
+
+// Sutherland–Hodgman clip of a camera-space polygon against the near plane.
+function clipNear(poly) {
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const cur = poly[i], nxt = poly[(i + 1) % poly.length];
+    const curIn = cur[2] >= NEAR_EPS, nxtIn = nxt[2] >= NEAR_EPS;
+    if (curIn) out.push(cur);
+    if (curIn !== nxtIn) {
+      const t = (NEAR_EPS - cur[2]) / (nxt[2] - cur[2]);
+      out.push([cur[0] + (nxt[0]-cur[0])*t, cur[1] + (nxt[1]-cur[1])*t, NEAR_EPS]);
+    }
+  }
+  return out;
+}
+// Draw a ground-level segment, clipped to the near plane so it never flips
+// behind the camera.
+function drawGroundSeg(x1, z1, x2, z2) {
+  let a = camSpace(x1, 0, z1), b = camSpace(x2, 0, z2);
+  if (a[2] < NEAR_EPS && b[2] < NEAR_EPS) return;
+  if (a[2] < NEAR_EPS) { const t = (NEAR_EPS-a[2])/(b[2]-a[2]); a = [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, NEAR_EPS]; }
+  else if (b[2] < NEAR_EPS) { const t = (NEAR_EPS-b[2])/(a[2]-b[2]); b = [b[0]+(a[0]-b[0])*t, b[1]+(a[1]-b[1])*t, NEAR_EPS]; }
+  const pa = projectCam(a), pb = projectCam(b);
+  if (pa && pb) { ctx.beginPath(); ctx.moveTo(pa.sx, pa.sy); ctx.lineTo(pb.sx, pb.sy); ctx.stroke(); }
 }
 
 function drawPoly(pts, fill, alpha, stroke) {
@@ -999,37 +1023,43 @@ function drawGround() {
     ctx.beginPath(); ctx.arc(sun.sx, sun.sy, 90, 0, Math.PI * 2); ctx.fill();
   }
 
-  // Grass plane
-  const gy = 0;
-  const near = -6, far = 200, halfW = 120;
-  const corners = [
-    project(-halfW, gy, craft.pos[2] + near),
-    project(halfW, gy, craft.pos[2] + near),
-    project(halfW, gy, craft.pos[2] + far),
-    project(-halfW, gy, craft.pos[2] + far),
-  ];
-  if (corners.every(c => c)) {
-    const gg = ctx.createLinearGradient(0, H, 0, H * 0.35);
-    gg.addColorStop(0, '#5f7a4a');
+  // Ground plane — a large quad clipped to the near plane so it ALWAYS fills
+  // below the horizon, even when banked or pitched. (The old single unclipped
+  // quad vanished whenever a corner passed behind the camera.)
+  const gy = 0, halfW = 600, gnear = -300, gfar = 900;
+  const groundQuad = clipNear([
+    camSpace(-halfW, gy, craft.pos[2] + gnear),
+    camSpace( halfW, gy, craft.pos[2] + gnear),
+    camSpace( halfW, gy, craft.pos[2] + gfar),
+    camSpace(-halfW, gy, craft.pos[2] + gfar),
+  ]).map(projectCam).filter(Boolean);
+  if (groundQuad.length >= 3) {
+    const gg = ctx.createLinearGradient(0, H, 0, 0);
+    gg.addColorStop(0, '#54703f');
     gg.addColorStop(1, '#7f9166');
     ctx.fillStyle = gg;
     ctx.beginPath();
-    ctx.moveTo(corners[0].sx, corners[0].sy);
-    for (let i = 1; i < 4; i++) ctx.lineTo(corners[i].sx, corners[i].sy);
+    ctx.moveTo(groundQuad[0].sx, groundQuad[0].sy);
+    for (let i = 1; i < groundQuad.length; i++) ctx.lineTo(groundQuad[i].sx, groundQuad[i].sy);
     ctx.closePath();
     ctx.fill();
-  } else {
-    ctx.fillStyle = '#6f855a';
-    ctx.fillRect(0, H * 0.4, W, H * 0.6);
   }
 
+  // Ground reference grid (every 10 m) — gives depth, motion and altitude cues.
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+  ctx.lineWidth = 1;
+  const gstep = 10, gridHalf = 150;
+  const baseZ = Math.floor(craft.pos[2] / gstep) * gstep;
+  for (let gx = -gridHalf; gx <= gridHalf; gx += gstep) drawGroundSeg(gx, baseZ - gridHalf, gx, baseZ + gridHalf);
+  for (let gz = baseZ - gridHalf; gz <= baseZ + gridHalf; gz += gstep) drawGroundSeg(-gridHalf, gz, gridHalf, gz);
+
   // Asphalt road strip down the corridor
-  const roadHalf = 4.5;
+  const roadHalf = 4.5, rnear = -6, rfar = 200;
   const rc = [
-    project(-roadHalf, 0.005, craft.pos[2] + near),
-    project(roadHalf, 0.005, craft.pos[2] + near),
-    project(roadHalf, 0.005, craft.pos[2] + far),
-    project(-roadHalf, 0.005, craft.pos[2] + far),
+    project(-roadHalf, 0.005, craft.pos[2] + rnear),
+    project(roadHalf, 0.005, craft.pos[2] + rnear),
+    project(roadHalf, 0.005, craft.pos[2] + rfar),
+    project(-roadHalf, 0.005, craft.pos[2] + rfar),
   ];
   if (rc.every(c => c)) drawPoly(rc, '#3a3f47', 1);
 
