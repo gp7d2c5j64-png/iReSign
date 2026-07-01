@@ -32,9 +32,13 @@ canvas { display: block; width: 100%; height: 100%; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* NOTE: use margin:auto on the child (below) to center, NOT
+     justify-content:center. With an overflowing child, flex centering
+     clips the top AND bottom and makes them unreachable — which hid the
+     tabs and the START FLIGHT button on short/landscape screens. */
   padding: 20px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 #overlay.hidden { display: none; }
 
@@ -43,6 +47,9 @@ canvas { display: block; width: 100%; height: 100%; }
   width: 90%;
   text-align: center;
   color: #e9edf3;
+  /* Auto margins center the menu when it fits, but collapse to allow
+     scrolling to the very top/bottom when it doesn't. */
+  margin: auto;
 }
 .menu-container h1 {
   font-size: 28px;
