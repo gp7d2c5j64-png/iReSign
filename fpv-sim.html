@@ -810,7 +810,6 @@ const phys = {
   gravity: 9.81,
   dragLin: 0.10,   // quadratic-ish air drag coefficient
   groundY: 0.12,
-  crashSpeed: 4.5,
 };
 
 /* =========================================================
@@ -1420,8 +1419,11 @@ function updatePhysics(dt) {
   const pitchRate = rateResponse(pitchStick, config.centerRP, config.ratePitch, config.expoRP) * Math.PI / 180;
   const yawRate = rateResponse(yawStick, config.centerYaw, config.rateYaw, config.expoYaw) * Math.PI / 180;
 
-  craft.ang[0] += rollRate * dt;
-  craft.ang[1] += yawRate * dt;
+  // Roll and yaw are inverted at the input so a right/right stick banks and
+  // yaws right (stick direction matches the resulting motion). Pitch already
+  // maps stick-forward -> fly-forward, so it integrates normally.
+  craft.ang[0] -= rollRate * dt;
+  craft.ang[1] -= yawRate * dt;
   craft.ang[2] += pitchRate * dt;
   // Keep yaw wrapped to avoid unbounded growth.
   if (craft.ang[1] > Math.PI) craft.ang[1] -= Math.PI * 2;
@@ -1456,11 +1458,12 @@ function updatePhysics(dt) {
   craft.pos[1] += v[1] * dt;
   craft.pos[2] += v[2] * dt;
 
-  // Ground collision
+  // Ground collision — only a genuinely hard hit (> 7 G) crashes. Anything
+  // softer just touches down, so normal landings never throw the warning.
   if (craft.pos[1] <= phys.groundY) {
-    const impact = Math.hypot(v[0], v[1], v[2]);
-    if (impact > phys.crashSpeed) {
-      triggerCrash(`Impact: ${(impact / 9.81).toFixed(1)}G — Too hard!`);
+    const impactG = Math.hypot(v[0], v[1], v[2]) / 9.81;
+    if (impactG > 7) {
+      triggerCrash(`Impact: ${impactG.toFixed(1)}G — Too hard!`);
       return;
     } else {
       craft.pos[1] = phys.groundY;
