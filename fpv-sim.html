@@ -1459,11 +1459,11 @@ function updatePhysics(dt) {
   const yawRate   = rateResponse(yawStick,   config.centerYaw, config.rateYaw,   config.expoYaw) * Math.PI / 180;
 
   // Body angular velocity vector: x = pitch (right axis), y = yaw (up axis),
-  // z = roll (forward axis). Yaw-right turns right and stick-forward pitches
-  // nose-down to fly forward. Roll is inverted per pilot preference (flip the
-  // sign of this rollRate term to swap roll direction). Integrating these in
-  // the BODY frame is what lets banked pitch carve a coordinated turn.
-  craft.q = integrateBodyRates(craft.q, pitchRate, yawRate, rollRate, dt);
+  // z = roll (forward axis). Signs give the standard convention: roll-right
+  // banks/drifts right, yaw-right turns right, stick-forward pitches nose-down
+  // to fly forward. Integrating these in the BODY frame is what lets banked
+  // pitch carve a coordinated turn.
+  craft.q = integrateBodyRates(craft.q, pitchRate, yawRate, -rollRate, dt);
 
   // Thrust acts along the body "up" axis, rotated into world space by the quat.
   const up = quatRotate(craft.q, 0, 1, 0);
