@@ -931,9 +931,11 @@ function camSpace(px, py, pz) {
   const b = quatRotate(qc, dx, dy, dz);
   const xb = b[0], yb = b[1], zb = b[2];
 
-  // Fixed FPV camera up-tilt (rotate about the body X/right axis).
+  // Fixed FPV camera up-tilt about the body X/right axis. Positive camAngle
+  // tilts the camera UP (like real FPV uptilt) so you look further ahead as
+  // the angle increases.
   const camTilt = config.camAngle * Math.PI / 180;
-  const cosP = Math.cos(-camTilt), sinP = Math.sin(-camTilt);
+  const cosP = Math.cos(camTilt), sinP = Math.sin(camTilt);
   return [xb, yb * cosP - zb * sinP, yb * sinP + zb * cosP];
 }
 const NEAR_EPS = 0.05;
