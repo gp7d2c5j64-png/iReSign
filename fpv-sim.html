@@ -446,31 +446,31 @@ button.secondary {
         <h3>Flight Rates (Max Rate)</h3>
         <div class="setting-row">
           <label>Roll</label>
-          <input type="range" id="rate-roll" min="200" max="1000" value="650">
-          <span class="setting-val" id="val-roll">650°/s</span>
+          <input type="range" id="rate-roll" min="40" max="1000" value="300">
+          <span class="setting-val" id="val-roll">300°/s</span>
         </div>
         <div class="setting-row">
           <label>Pitch</label>
-          <input type="range" id="rate-pitch" min="200" max="1000" value="650">
-          <span class="setting-val" id="val-pitch">650°/s</span>
+          <input type="range" id="rate-pitch" min="40" max="1000" value="300">
+          <span class="setting-val" id="val-pitch">300°/s</span>
         </div>
         <div class="setting-row">
           <label>Yaw</label>
-          <input type="range" id="rate-yaw" min="100" max="800" value="400">
-          <span class="setting-val" id="val-yaw">400°/s</span>
+          <input type="range" id="rate-yaw" min="30" max="800" value="200">
+          <span class="setting-val" id="val-yaw">200°/s</span>
         </div>
       </div>
       <div class="settings-group">
         <h3>Center Sensitivity</h3>
         <div class="setting-row">
           <label>Roll/Pitch</label>
-          <input type="range" id="rate-rp-center" min="10" max="200" value="50">
-          <span class="setting-val" id="val-rp-center">50°/s</span>
+          <input type="range" id="rate-rp-center" min="5" max="200" value="45">
+          <span class="setting-val" id="val-rp-center">45°/s</span>
         </div>
         <div class="setting-row">
           <label>Yaw</label>
-          <input type="range" id="rate-yaw-center" min="10" max="200" value="40">
-          <span class="setting-val" id="val-yaw-center">40°/s</span>
+          <input type="range" id="rate-yaw-center" min="5" max="200" value="35">
+          <span class="setting-val" id="val-yaw-center">35°/s</span>
         </div>
       </div>
       <div class="settings-group">
@@ -607,12 +607,16 @@ button.secondary {
    CONFIG / STATE
    ========================================================= */
 const config = {
-  rateRoll: 650, ratePitch: 650, rateYaw: 400,
-  centerRP: 50, centerYaw: 40,
+  rateRoll: 300, ratePitch: 300, rateYaw: 200,
+  centerRP: 45, centerYaw: 35,
   expoRP: 0.40, expoYaw: 0.50,
   camAngle: 30, camFov: 115,
   stickSize: 1.0, stickOpacity: 1.0, stickDeadzone: 0.08,
+  rateSmooth: 0.13, // seconds — low-pass on commanded rates (less twitchy)
 };
+
+// Smoothed (low-passed) angular rates so quick stick jabs ramp in.
+let easedRoll = 0, easedPitch = 0, easedYaw = 0;
 
 const state = {
   armed: false,
@@ -1305,6 +1309,7 @@ function updatePhysics(dt) {
   // drift, fall, or rotate until the pilot arms. (Prevents ghost movement.)
   if (!state.armed) {
     craft.vel[0] = craft.vel[1] = craft.vel[2] = 0;
+    easedRoll = easedPitch = easedYaw = 0;
     return;
   }
 
@@ -1319,12 +1324,19 @@ function updatePhysics(dt) {
   const pitchRate = rateResponse(pitchStick, config.centerRP,  config.ratePitch, config.expoRP)  * Math.PI / 180;
   const yawRate   = rateResponse(yawStick,   config.centerYaw, config.rateYaw,   config.expoYaw) * Math.PI / 180;
 
+  // Low-pass the commanded rates so the response ramps in instead of snapping
+  // — takes the twitch out without adding noticeable lag.
+  const k = 1 - Math.exp(-dt / config.rateSmooth);
+  easedRoll  += (rollRate  - easedRoll)  * k;
+  easedPitch += (pitchRate - easedPitch) * k;
+  easedYaw   += (yawRate   - easedYaw)   * k;
+
   // Body angular velocity vector: x = pitch (right axis), y = yaw (up axis),
   // z = roll (forward axis). Signs give the standard convention: roll-right
   // banks/drifts right, yaw-right turns right, stick-forward pitches nose-down
   // to fly forward. Integrating these in the BODY frame is what lets banked
   // pitch carve a coordinated turn.
-  craft.q = integrateBodyRates(craft.q, pitchRate, yawRate, -rollRate, dt);
+  craft.q = integrateBodyRates(craft.q, easedPitch, easedYaw, -easedRoll, dt);
 
   // Thrust acts along the body "up" axis, rotated into world space by the quat.
   const up = quatRotate(craft.q, 0, 1, 0);
