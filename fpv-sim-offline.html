@@ -1966,11 +1966,11 @@ function initRenderer() {
   // Filmic tone mapping + sRGB output for a modern, "engine-grade" look.
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 0.98;
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9ec9e8);
-  scene.fog = new THREE.Fog(0xbcd7ea, 150, 680);
+  scene.fog = new THREE.Fog(0xc4dded, 110, 560);
 
   camera3 = new THREE.PerspectiveCamera(config.camFov, 1, 0.1, 3000);
 
@@ -1988,14 +1988,15 @@ function initRenderer() {
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(2000, 32, 16), skyMat));
 
   // Lighting: sky/ground fill + a strong sun with soft shadows.
-  const hemi = new THREE.HemisphereLight(0xbcd6ef, 0x3c5230, 0.85);
+  const hemi = new THREE.HemisphereLight(0xcfe3f2, 0x6a7f5a, 1.25);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff1d4, 2.6);
+  const sun = new THREE.DirectionalLight(0xfff3de, 1.55);
   sun.position.set(60, 120, -50);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.04; // kills self-shadow acne banding on flat ground/road
+  sun.shadow.radius = 6;         // soft, blurred shadow edges
   const s = 140;
   sun.shadow.camera.left = -s; sun.shadow.camera.right = s;
   sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
@@ -2022,7 +2023,7 @@ function initRenderer() {
   // Post-processing: UnrealBloomPass gives the emissive gates / highlights a glow.
   composer = new THREE.EffectComposer(renderer);
   composer.addPass(new THREE.RenderPass(scene, camera3));
-  const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(1, 1), 0.22, 0.35, 0.96);
+  const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(1, 1), 0.16, 0.45, 0.97);
   composer.addPass(bloom);
 
   ready3d = true;
@@ -2085,10 +2086,10 @@ function buildScene() {
 
   // Detailed palm trees: segmented curving trunk, drooping fronds, coconuts.
   // Materials + frond geometry are shared across all palms for performance.
-  const palmTrunkMat = new THREE.MeshStandardMaterial({ color: 0x8a7250, roughness: 0.92, metalness: 0.0, flatShading: true });
-  const palmCrownMat = new THREE.MeshStandardMaterial({ color: 0x5a4630, roughness: 0.9, flatShading: true });
-  const frondMatA = new THREE.MeshStandardMaterial({ color: 0x3c7a37, roughness: 0.7, metalness: 0.0, flatShading: true, side: THREE.DoubleSide });
-  const frondMatB = new THREE.MeshStandardMaterial({ color: 0x4f9a44, roughness: 0.7, metalness: 0.0, flatShading: true, side: THREE.DoubleSide });
+  const palmTrunkMat = new THREE.MeshStandardMaterial({ color: 0x8a7250, roughness: 0.95, metalness: 0.0 });
+  const palmCrownMat = new THREE.MeshStandardMaterial({ color: 0x5a4630, roughness: 0.9 });
+  const frondMatA = new THREE.MeshStandardMaterial({ color: 0x3c7a37, roughness: 0.8, metalness: 0.0, side: THREE.DoubleSide });
+  const frondMatB = new THREE.MeshStandardMaterial({ color: 0x4f9a44, roughness: 0.8, metalness: 0.0, side: THREE.DoubleSide });
   const coconutMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.85 });
   // A frond = a flattened, tapered blade pointing +X from its base at the origin.
   const frondGeo = new THREE.ConeGeometry(0.3, 3.8, 4);
