@@ -540,7 +540,8 @@ button.secondary {
         <strong>Acro mode</strong> — no self-leveling. The quad holds whatever angle you set.<br><br>
         <strong>ARM</strong> first (throttle must be at zero — safety interlock). Tap ARM (or press <kbd>Space</kbd>) anytime to disarm and cut motors instantly.<br><br>
         Fly through the <strong>gold gates</strong> down the street. Land gently (under ~4.5 m/s) to touch down safely — hit harder and you'll crash and need to reset.<br><br>
-        <strong>Keyboard:</strong> throttle <kbd>W</kbd>/<kbd>S</kbd>, yaw <kbd>A</kbd>/<kbd>D</kbd>, pitch <kbd>↑</kbd>/<kbd>↓</kbd>, roll <kbd>←</kbd>/<kbd>→</kbd>, arm <kbd>Space</kbd>, reset <kbd>R</kbd>.
+        <strong>Keyboard:</strong> throttle <kbd>W</kbd>/<kbd>S</kbd>, yaw <kbd>A</kbd>/<kbd>D</kbd>, pitch <kbd>↑</kbd>/<kbd>↓</kbd>, roll <kbd>←</kbd>/<kbd>→</kbd>, arm <kbd>Space</kbd>, reset <kbd>R</kbd>.<br><br>
+        <strong>Controller:</strong> plug in a gamepad or USB radio (Mode 2) — left stick throttle/yaw, right stick pitch/roll. <kbd>A</kbd>/Start arms, <kbd>B</kbd>/Select resets. Just move a stick to activate it.
       </p>
     </div>
 
@@ -759,6 +760,7 @@ function setupKeyboard() {
 }
 
 function applyKeyboard(dt) {
+  if (pad.engaged) return; // a controller has taken over the sticks
   const L = sticks.left, R = sticks.right;
 
   // Left stick (throttle holds, yaw springs) — only if no finger/mouse on it.
@@ -787,7 +789,70 @@ function applyKeyboard(dt) {
 }
 
 function stickIsActive(s) {
-  return s.id !== null || s.kbActive;
+  return s.id !== null || s.kbActive || (pad.engaged && s.gpActive);
+}
+
+/* =========================================================
+   GAMEPAD / CONTROLLER SUPPORT (Gamepad API)
+   Works with Xbox/PS pads and many USB RC transmitters. Mode 2:
+   left stick = throttle (Y) + yaw (X), right stick = pitch (Y) + roll (X).
+   ========================================================= */
+const pad = { engaged: false, prevButtons: [] };
+
+function setupGamepad() {
+  window.addEventListener('gamepadconnected', e => {
+    controllerToast('🎮 ' + e.gamepad.id.replace(/\(.*\)/, '').trim().slice(0, 26) + ' connected');
+  });
+  window.addEventListener('gamepaddisconnected', () => { pad.engaged = false; });
+}
+
+function gpDead(v) { return Math.abs(v) < 0.06 ? 0 : v; }
+
+function pollGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let g = null;
+  for (const x of pads) { if (x) { g = x; break; } }
+  if (!g) { pad.engaged = false; return; }
+
+  const ax = g.axes, bt = g.buttons;
+  // Engage only once real input arrives, so an idle connected pad doesn't
+  // stomp on touch/keyboard control.
+  if (!pad.engaged) {
+    if (ax.some(a => Math.abs(a) > 0.15) || bt.some(b => b && b.pressed)) pad.engaged = true;
+    else return;
+  }
+
+  const yaw   = gpDead(ax[0] || 0);
+  const thr   = gpDead(-(ax[1] || 0));
+  const roll  = gpDead(ax[2] || 0);
+  const pitch = gpDead(-(ax[3] || 0));
+  sticks.left.rawX  = yaw;   sticks.left.rawY  = Math.max(0, thr);
+  sticks.right.rawX = roll;  sticks.right.rawY = pitch;
+  sticks.left.gpActive  = (yaw !== 0 || thr !== 0);
+  sticks.right.gpActive = (roll !== 0 || pitch !== 0);
+
+  const down = i => bt[i] && bt[i].pressed;
+  const edge = i => down(i) && !pad.prevButtons[i];
+  if ((edge(0) || edge(9)) && state.flying) toggleArm();      // A / Start -> arm
+  if ((edge(1) || edge(8)) && state.crashed) resetCraft();    // B / Select -> reset
+  pad.prevButtons = bt.map(b => !!(b && b.pressed));
+}
+
+// Small transient toast (top-center) for controller connect messages.
+function controllerToast(msg) {
+  let el = document.getElementById('ctrl-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ctrl-toast';
+    el.style.cssText = 'position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:80;' +
+      'background:rgba(20,23,29,0.9);border:1px solid #39ff6a;color:#39ff6a;padding:6px 14px;' +
+      "border-radius:6px;font:12px 'Share Tech Mono',monospace;white-space:nowrap;pointer-events:none;";
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.5s'; }, 2600);
 }
 
 function renderSticks() {
@@ -1322,6 +1387,7 @@ window.onload = () => {
   window.addEventListener('resize', resizeCanvas);
 
   setupSticks();
+  setupGamepad();
   setupMenu();
   updateRotateBanner();
   window.addEventListener('resize', updateRotateBanner);
@@ -1654,6 +1720,7 @@ function animate() {
   const dt = Math.min((now - lastTime) / 1000, 0.033);
   lastTime = now;
 
+  pollGamepad();   // always poll so controller arm/reset work even when crashed/paused
   updatePhysics(dt);
   renderWorld();
   renderSticks();
