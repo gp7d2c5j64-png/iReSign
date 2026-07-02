@@ -670,6 +670,7 @@ button.secondary {
     <div id="calib-sub"></div>
     <p id="calib-desc"></p>
     <div id="calib-readout"></div>
+    <div id="calib-hint" style="color:#d9a441; font-size:11px; margin-top:8px; min-height:14px;"></div>
     <div style="margin-top:14px;">
       <button id="calib-next" onclick="calibNext()">Next</button>
       <button class="secondary" onclick="cancelCalibration()">Cancel</button>
@@ -948,50 +949,79 @@ function showCalibStep() {
   document.getElementById('calib-sub').textContent = s[0];
   document.getElementById('calib-desc').textContent = s[1];
   document.getElementById('calib-next').textContent = calib.step >= CALIB_STEPS.length - 1 ? 'Finish' : 'Next';
+  calibHint(calib.step === 0 ? '' : 'Tip: the moving axis turns green. You can also tap any axis below to map this channel manually.');
 }
-function biggestDelta(ax) {
-  let bi = -1, bd = 0.12; // require a meaningful move
+function calibAxes() { const g = firstPad(); return g ? Array.from(g.axes) : []; }
+
+// Record the current channel onto a given axis using the live stick values.
+function calibApply(step, axis, ax) {
+  const base = i => calib.baseline[i] || 0;
+  if (step === 1) { calib.tmp.thrAxis = axis; calib.tmp.thrHi = ax[axis]; }
+  else if (step === 2) { if (calib.tmp.thrAxis == null) calib.tmp.thrAxis = axis; calib.tmp.thrLo = ax[calib.tmp.thrAxis]; }
+  else if (step === 3) calib.tmp.yaw   = { axis, center: base(axis), range: ax[axis] - base(axis) };
+  else if (step === 4) calib.tmp.pitch = { axis, center: base(axis), range: ax[axis] - base(axis) };
+  else if (step === 5) calib.tmp.roll  = { axis, center: base(axis), range: ax[axis] - base(axis) };
+}
+
+// Auto-pick the axis that moved most from baseline. For the spring channels we
+// ignore only the throttle axis (it stays deflected on a radio); EVERY other
+// axis is available to every channel — no axis is locked out.
+function detectAxis(ax) {
+  const skipThrottle = calib.step >= 3 ? calib.tmp.thrAxis : -1;
+  let bi = -1, bd = 0.08;
   for (let i = 0; i < ax.length; i++) {
-    if (calib.used.has(i)) continue;
+    if (i === skipThrottle) continue;
     const d = Math.abs(ax[i] - (calib.baseline[i] || 0));
     if (d > bd) { bd = d; bi = i; }
   }
   return bi;
 }
-function calibNext() {
-  const g = firstPad(); if (!g) return;
-  const ax = Array.from(g.axes);
-  switch (calib.step) {
-    case 0: calib.baseline = ax.slice(); break;
-    case 1: { const a = biggestDelta(ax); if (a < 0) return; calib.tmp.thrAxis = a; calib.tmp.thrHi = ax[a]; calib.used.add(a); } break;
-    case 2: calib.tmp.thrLo = ax[calib.tmp.thrAxis]; break;
-    case 3: { const a = biggestDelta(ax); if (a < 0) return; calib.tmp.yaw = { axis: a, center: calib.baseline[a] || 0, range: ax[a] - (calib.baseline[a] || 0) }; calib.used.add(a); } break;
-    case 4: { const a = biggestDelta(ax); if (a < 0) return; calib.tmp.pitch = { axis: a, center: calib.baseline[a] || 0, range: ax[a] - (calib.baseline[a] || 0) }; calib.used.add(a); } break;
-    case 5: {
-      const a = biggestDelta(ax); if (a < 0) return;
-      calib.tmp.roll = { axis: a, center: calib.baseline[a] || 0, range: ax[a] - (calib.baseline[a] || 0) };
-      gpMap = {
-        throttle: { axis: calib.tmp.thrAxis, lo: calib.tmp.thrLo, hi: calib.tmp.thrHi },
-        yaw: calib.tmp.yaw, pitch: calib.tmp.pitch, roll: calib.tmp.roll,
-      };
-      calib.active = false;
-      document.getElementById('calib-overlay').classList.remove('show');
-      controllerToast('🎮 Controller calibrated — ready to fly');
-      return;
-    }
+
+function calibHint(msg) { const el = document.getElementById('calib-hint'); if (el) el.textContent = msg || ''; }
+
+function finalizeOrAdvance() {
+  if (calib.step >= CALIB_STEPS.length - 1) {
+    gpMap = {
+      throttle: { axis: calib.tmp.thrAxis, lo: calib.tmp.thrLo, hi: calib.tmp.thrHi },
+      yaw: calib.tmp.yaw, pitch: calib.tmp.pitch, roll: calib.tmp.roll,
+    };
+    calib.active = false;
+    document.getElementById('calib-overlay').classList.remove('show');
+    controllerToast('🎮 Controller calibrated — ready to fly');
+  } else {
+    calib.step++; showCalibStep();
   }
-  calib.step++; showCalibStep();
 }
+
+function calibNext() {
+  const ax = calibAxes();
+  if (!ax.length) { calibHint('No controller detected — plug in and move a stick.'); return; }
+  if (calib.step === 0) { calib.baseline = ax.slice(); calib.step++; showCalibStep(); return; }
+  if (calib.step === 2) { calibApply(2, calib.tmp.thrAxis, ax); finalizeOrAdvance(); return; }
+  const a = detectAxis(ax);
+  if (a < 0) { calibHint('No movement detected — move the stick fully, or tap an axis below to map it.'); return; }
+  calibApply(calib.step, a, ax); finalizeOrAdvance();
+}
+
+// Manual override: tap an axis chip to map the current channel to that axis.
+function calibAssign(i) {
+  if (!calib.active || calib.step === 0) return;
+  const ax = calibAxes(); if (!ax.length) return;
+  calibApply(calib.step, i, ax); finalizeOrAdvance();
+}
+
 function cancelCalibration() {
   calib.active = false;
   document.getElementById('calib-overlay').classList.remove('show');
 }
+
 function updateCalibReadout() {
-  const g = firstPad(); if (!g) return;
-  const ax = g.axes, big = calib.step > 0 ? biggestDelta(ax) : -1;
+  const ax = calibAxes(); if (!ax.length) return;
+  const big = calib.step > 0 && calib.step !== 2 ? detectAxis(ax) : -1;
   let html = '';
   for (let i = 0; i < ax.length; i++) {
-    html += `<span style="display:inline-block;min-width:70px;color:${i === big ? '#39ff6a' : '#5b6577'}">A${i}: ${ax[i].toFixed(2)}</span>`;
+    const col = i === big ? '#39ff6a' : '#8d96a6';
+    html += `<span onclick="calibAssign(${i})" style="display:inline-block;min-width:74px;margin:2px;padding:3px 4px;border:1px solid #2c313b;border-radius:4px;cursor:pointer;color:${col}">A${i}: ${ax[i].toFixed(2)}</span>`;
   }
   document.getElementById('calib-readout').innerHTML = html;
 }
