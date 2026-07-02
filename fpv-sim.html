@@ -490,8 +490,8 @@ button.secondary {
         <h3>Propwash</h3>
         <div class="setting-row">
           <label>Turbulence</label>
-          <input type="range" id="propwash" min="0" max="100" value="50">
-          <span class="setting-val" id="val-propwash">50%</span>
+          <input type="range" id="propwash" min="0" max="100" value="5">
+          <span class="setting-val" id="val-propwash">5%</span>
         </div>
       </div>
     </div>
@@ -622,7 +622,7 @@ const config = {
   camAngle: 30, camFov: 115,
   stickSize: 1.0, stickOpacity: 1.0, stickDeadzone: 0.08,
   rateSmooth: 0.13, // seconds — low-pass on commanded rates (less twitchy)
-  propwash: 0.5,    // 0..1 — turbulence when descending through your own prop wake
+  propwash: 0.05,   // 0..1 — turbulence when descending through your own prop wake
 };
 
 // Smoothed (low-passed) angular rates so quick stick jabs ramp in.
