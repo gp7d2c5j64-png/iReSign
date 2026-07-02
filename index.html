@@ -677,6 +677,7 @@ button.secondary {
   <div class="calib-card" style="max-width:520px;">
     <h2>Controller Axes</h2>
     <p style="color:#8d96a6; font-size:12px; margin:6px 0 10px;">Move every stick through its full range so the bars fill, then choose which axis is which and Save. The moving axis lights up green.</p>
+    <div id="axes-devinfo" style="font-family:'Share Tech Mono',monospace; font-size:10px; color:#5ad1e6; margin:0 0 8px; word-break:break-all;"></div>
     <div id="axes-list"></div>
     <div id="axes-buttons" style="font-family:'Share Tech Mono',monospace; font-size:11px; color:#8d96a6; margin-top:6px;">Buttons: —</div>
     <div style="border-top:1px solid #2c313b; margin:12px 0; padding-top:10px; text-align:left;">
@@ -925,9 +926,17 @@ const CALIB_STEPS = [
 const calib = { active: false, step: 0, baseline: [], axMin: [], axMax: [], tmp: {} };
 
 function firstPad() {
+  // RC radios often enumerate as TWO HID interfaces; if Chrome fills slot 0
+  // with the phantom one, a real gimbal channel goes "missing". Always pick the
+  // richest pad — the most axes+buttons — so we read the real joystick.
   const ps = navigator.getGamepads ? navigator.getGamepads() : [];
-  for (const x of ps) if (x) return x;
-  return null;
+  let best = null, bestScore = -1;
+  for (const x of ps) {
+    if (!x) continue;
+    const score = (x.axes ? x.axes.length : 0) + (x.buttons ? x.buttons.length : 0);
+    if (score > bestScore) { bestScore = score; best = x; }
+  }
+  return best;
 }
 
 function setupGamepad() {
@@ -1284,6 +1293,12 @@ function updateAxesPage() {
   }
   list.innerHTML = html;
   document.getElementById('axes-buttons').textContent = `${ax.length} axes, ${bt.length} buttons found`;
+  const di = document.getElementById('axes-devinfo');
+  if (di) {
+    const std = g.mapping === 'standard';
+    di.innerHTML = `dev: ${g.id.replace(/[<>]/g, '')}<br>mapping: <b style="color:${std ? '#ff9d3d' : '#39ff6a'}">${g.mapping || 'raw'}</b> · ${ax.length} axes · ${bt.length} buttons`
+      + (std ? `<br><span style="color:#ff9d3d">⚠ Chrome forced "standard" mode — it collapses the radio to 4 axes and can hide a gimbal. Try Firefox, or in EdgeTX SYS→Hardware set the gimbals so all 4 land on axes.</span>` : '');
+  }
   tickDetect(ax, bt);
 }
 
