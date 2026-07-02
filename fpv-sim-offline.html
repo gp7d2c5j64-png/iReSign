@@ -2199,6 +2199,10 @@ function openAxesPage() {
   if (!g) { alert('No controller detected.\n\nPlug your radio in as a USB Joystick, move a stick to wake it, then try again.'); return; }
   setInputMode('remote');
   axPage.open = true; axPage.min = []; axPage.max = []; axPage.bmin = []; axPage.bmax = [];
+  // Snapshot the resting position (sticks assumed centered, throttle at rest)
+  // so spring channels use this as their true center, not the min/max midpoint.
+  axPage.baseline = Array.from(g.axes);
+  axPage.bbaseline = g.buttons.map(b => b ? (b.value != null ? b.value : (b.pressed ? 1 : 0)) : 0);
   buildAxisSelects(g.axes.length, g.buttons.length);
   if (gpMap) {
     const setSel = (id, v) => { const el = document.getElementById(id); if ([...el.options].some(o => o.value === v)) el.value = v; };
@@ -2271,7 +2275,12 @@ function saveManualMap() {
     let mx = isButton ? axPage.bmax[idx] : axPage.max[idx];
     if (mn == null) mn = isButton ? 0 : -1;
     if (mx == null) mx = 1;
-    return { isButton, idx, mn, mx, center: (mn + mx) / 2, half: ((mx - mn) / 2) || 1 };
+    // Center = the resting value captured at open (correct for spring sticks,
+    // even if you only pushed one way). Half = the largest deflection seen.
+    const base = isButton ? axPage.bbaseline[idx] : axPage.baseline[idx];
+    const center = base != null ? base : (mn + mx) / 2;
+    const half = Math.max(Math.abs(mx - center), Math.abs(mn - center)) || 1;
+    return { isButton, idx, mn, mx, center, half };
   };
   const spring = (selId, invId) => { const r = rng(val(selId)); return { axis: r.idx, isButton: r.isButton, center: r.center, range: r.half * (inv(invId) ? -1 : 1) }; };
   const t = rng(val('map-throttle'));
