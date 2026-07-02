@@ -571,6 +571,7 @@ button.secondary {
         </div>
         <div id="remote-panel" style="display:none; margin-top:10px;">
           <div id="gp-status" style="font-size:11px; color:#8d96a6; font-family:'Share Tech Mono',monospace;">⚠ No controller — plug in (USB Joystick) &amp; move a stick</div>
+          <div id="gp-channels" style="font-size:11px; color:#39ff6a; font-family:'Share Tech Mono',monospace; margin-top:4px;"></div>
           <button class="secondary" style="width:100%; margin:8px 0 0;" onclick="startCalibration()">Calibrate Sticks</button>
         </div>
         <p class="info-text" style="margin:10px 0 0;">Touch uses the on-screen sticks. Remote flies with a gamepad / USB radio. <strong>RC radios (RadioMaster etc.) must be calibrated</strong> so the channels map correctly.</p>
@@ -1897,14 +1898,14 @@ const pad = { engaged: false, prevButtons: [] };
 let gpMap = null; // calibrated channel map for RC radios / non-standard pads
 
 const CALIB_STEPS = [
-  ['Center the sticks', 'Leave both sticks centered (throttle where it naturally rests), then tap Next.'],
-  ['Throttle — full UP', 'Push the THROTTLE stick all the way UP and hold, then tap Next.'],
-  ['Throttle — full DOWN', 'Pull the THROTTLE stick all the way DOWN and hold, then tap Next.'],
+  ['Center the sticks', 'Leave both sticks centered, then tap Next.'],
+  ['Throttle — full sweep', 'Move the THROTTLE stick fully UP and fully DOWN a few times (its whole travel), then tap Next.'],
+  ['Throttle — hold at TOP', 'Now push THROTTLE all the way to the TOP and hold, then tap Next.'],
   ['Yaw — full RIGHT', 'Hold the YAW (rudder) stick fully RIGHT, then tap Next.'],
   ['Pitch — full FORWARD', 'Hold the PITCH (elevator) stick fully FORWARD/UP, then tap Next.'],
   ['Roll — full RIGHT', 'Hold the ROLL (aileron) stick fully RIGHT, then tap Finish.'],
 ];
-const calib = { active: false, step: 0, baseline: [], used: new Set(), tmp: {} };
+const calib = { active: false, step: 0, baseline: [], axMin: [], axMax: [], tmp: {} };
 
 function firstPad() {
   const ps = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -1958,7 +1959,7 @@ function startCalibration() {
     return;
   }
   setInputMode('remote');
-  calib.active = true; calib.step = 0; calib.baseline = []; calib.used = new Set(); calib.tmp = {};
+  calib.active = true; calib.step = 0; calib.baseline = []; calib.axMin = []; calib.axMax = []; calib.tmp = {};
   document.getElementById('calib-overlay').classList.add('show');
   showCalibStep();
 }
@@ -1968,25 +1969,35 @@ function showCalibStep() {
   document.getElementById('calib-sub').textContent = s[0];
   document.getElementById('calib-desc').textContent = s[1];
   document.getElementById('calib-next').textContent = calib.step >= CALIB_STEPS.length - 1 ? 'Finish' : 'Next';
+  if (calib.step === 1) { calib.axMin = []; calib.axMax = []; } // reset throttle-range tracking
   calibHint(calib.step === 0 ? '' : 'Tip: the moving axis turns green. You can also tap any axis below to map this channel manually.');
 }
 function calibAxes() { const g = firstPad(); return g ? Array.from(g.axes) : []; }
 
 // Record the current channel onto a given axis using the live stick values.
-function calibApply(step, axis, ax) {
-  const base = i => calib.baseline[i] || 0;
-  if (step === 1) { calib.tmp.thrAxis = axis; calib.tmp.thrHi = ax[axis]; }
-  else if (step === 2) { if (calib.tmp.thrAxis == null) calib.tmp.thrAxis = axis; calib.tmp.thrLo = ax[calib.tmp.thrAxis]; }
-  else if (step === 3) calib.tmp.yaw   = { axis, center: base(axis), range: ax[axis] - base(axis) };
-  else if (step === 4) calib.tmp.pitch = { axis, center: base(axis), range: ax[axis] - base(axis) };
-  else if (step === 5) calib.tmp.roll  = { axis, center: base(axis), range: ax[axis] - base(axis) };
+function springMap(a, ax) { const c = calib.baseline[a] || 0; return { axis: a, center: c, range: ax[a] - c }; }
+// The throttle axis = the one with the widest travel seen during the sweep.
+function thrCandidate() {
+  let bi = -1, br = 0.25;
+  for (let i = 0; i < calib.axMax.length; i++) {
+    const r = (calib.axMax[i] || 0) - (calib.axMin[i] || 0);
+    if (r > br) { br = r; bi = i; }
+  }
+  return bi;
+}
+// Decide which end of the throttle travel is "up" from the held-top sample.
+function setThrottleDir(ax) {
+  const top = ax[calib.tmp.thrAxis];
+  const dHi = Math.abs(top - calib.tmp.thrMax), dLo = Math.abs(top - calib.tmp.thrMin);
+  if (dHi <= dLo) calib.tmp.throttle = { axis: calib.tmp.thrAxis, lo: calib.tmp.thrMin, hi: calib.tmp.thrMax };
+  else            calib.tmp.throttle = { axis: calib.tmp.thrAxis, lo: calib.tmp.thrMax, hi: calib.tmp.thrMin };
 }
 
 // Auto-pick the axis that moved most from baseline. For the spring channels we
 // ignore only the throttle axis (it stays deflected on a radio); EVERY other
 // axis is available to every channel — no axis is locked out.
 function detectAxis(ax) {
-  const skipThrottle = calib.step >= 3 ? calib.tmp.thrAxis : -1;
+  const skipThrottle = calib.tmp.thrAxis;
   let bi = -1, bd = 0.08;
   for (let i = 0; i < ax.length; i++) {
     if (i === skipThrottle) continue;
@@ -1998,35 +2009,44 @@ function detectAxis(ax) {
 
 function calibHint(msg) { const el = document.getElementById('calib-hint'); if (el) el.textContent = msg || ''; }
 
-function finalizeOrAdvance() {
-  if (calib.step >= CALIB_STEPS.length - 1) {
-    gpMap = {
-      throttle: { axis: calib.tmp.thrAxis, lo: calib.tmp.thrLo, hi: calib.tmp.thrHi },
-      yaw: calib.tmp.yaw, pitch: calib.tmp.pitch, roll: calib.tmp.roll,
-    };
-    calib.active = false;
-    document.getElementById('calib-overlay').classList.remove('show');
-    controllerToast('🎮 Controller calibrated — ready to fly');
-  } else {
-    calib.step++; showCalibStep();
-  }
+function finalizeCalib() {
+  gpMap = { throttle: calib.tmp.throttle, yaw: calib.tmp.yaw, pitch: calib.tmp.pitch, roll: calib.tmp.roll };
+  calib.active = false;
+  document.getElementById('calib-overlay').classList.remove('show');
+  controllerToast('🎮 Controller calibrated — ready to fly');
 }
 
 function calibNext() {
   const ax = calibAxes();
   if (!ax.length) { calibHint('No controller detected — plug in and move a stick.'); return; }
-  if (calib.step === 0) { calib.baseline = ax.slice(); calib.step++; showCalibStep(); return; }
-  if (calib.step === 2) { calibApply(2, calib.tmp.thrAxis, ax); finalizeOrAdvance(); return; }
-  const a = detectAxis(ax);
-  if (a < 0) { calibHint('No movement detected — move the stick fully, or tap an axis below to map it.'); return; }
-  calibApply(calib.step, a, ax); finalizeOrAdvance();
+  switch (calib.step) {
+    case 0: calib.baseline = ax.slice(); break;
+    case 1: {
+      const a = thrCandidate();
+      if (a < 0) { calibHint('Move the throttle through its FULL up/down travel, then tap Next.'); return; }
+      calib.tmp.thrAxis = a; calib.tmp.thrMin = calib.axMin[a]; calib.tmp.thrMax = calib.axMax[a];
+    } break;
+    case 2: setThrottleDir(ax); break;
+    case 3: { const a = detectAxis(ax); if (a < 0) { calibHint('No movement — hold the stick fully, or tap an axis below.'); return; } calib.tmp.yaw = springMap(a, ax); } break;
+    case 4: { const a = detectAxis(ax); if (a < 0) { calibHint('No movement — hold the stick fully, or tap an axis below.'); return; } calib.tmp.pitch = springMap(a, ax); } break;
+    case 5: { const a = detectAxis(ax); if (a < 0) { calibHint('No movement — hold the stick fully, or tap an axis below.'); return; } calib.tmp.roll = springMap(a, ax); finalizeCalib(); return; }
+  }
+  calib.step++; showCalibStep();
 }
 
 // Manual override: tap an axis chip to map the current channel to that axis.
 function calibAssign(i) {
   if (!calib.active || calib.step === 0) return;
   const ax = calibAxes(); if (!ax.length) return;
-  calibApply(calib.step, i, ax); finalizeOrAdvance();
+  switch (calib.step) {
+    case 1: calib.tmp.thrAxis = i; calib.tmp.thrMin = (calib.axMin[i] != null ? calib.axMin[i] : ax[i]); calib.tmp.thrMax = (calib.axMax[i] != null ? calib.axMax[i] : ax[i]); break;
+    case 2: setThrottleDir(ax); break;
+    case 3: calib.tmp.yaw = springMap(i, ax); break;
+    case 4: calib.tmp.pitch = springMap(i, ax); break;
+    case 5: calib.tmp.roll = springMap(i, ax); finalizeCalib(); return;
+    default: return;
+  }
+  calib.step++; showCalibStep();
 }
 
 function cancelCalibration() {
@@ -2036,7 +2056,15 @@ function cancelCalibration() {
 
 function updateCalibReadout() {
   const ax = calibAxes(); if (!ax.length) return;
-  const big = calib.step > 0 && calib.step !== 2 ? detectAxis(ax) : -1;
+  if (calib.step === 1) { // track full throttle travel during the sweep
+    for (let i = 0; i < ax.length; i++) {
+      if (calib.axMin[i] == null) { calib.axMin[i] = ax[i]; calib.axMax[i] = ax[i]; }
+      else { calib.axMin[i] = Math.min(calib.axMin[i], ax[i]); calib.axMax[i] = Math.max(calib.axMax[i], ax[i]); }
+    }
+  }
+  let big = -1;
+  if (calib.step === 1) big = thrCandidate();
+  else if (calib.step >= 3) big = detectAxis(ax);
   let html = '';
   for (let i = 0; i < ax.length; i++) {
     const col = i === big ? '#39ff6a' : '#8d96a6';
@@ -2108,6 +2136,15 @@ function updateGamepadStatus() {
   st.textContent = g
     ? '✅ ' + g.id.replace(/\(.*\)/, '').trim().slice(0, 30) + (gpMap ? ' — calibrated' : ' — tap Calibrate Sticks')
     : '⚠ No controller — plug in (USB Joystick) & move a stick';
+  // Live channel readout so you can verify the mapping (throttle center = 50%).
+  const ch = document.getElementById('gp-channels');
+  if (ch) {
+    if (g && gpMap && !calib.active) {
+      const ax = g.axes;
+      const thr = Math.round(readThrottle(ax, gpMap.throttle) * 100);
+      ch.textContent = `THR ${thr}%  YAW ${readChan(ax, gpMap.yaw).toFixed(2)}  PIT ${readChan(ax, gpMap.pitch).toFixed(2)}  ROL ${readChan(ax, gpMap.roll).toFixed(2)}`;
+    } else ch.textContent = '';
+  }
 }
 
 // Small transient toast (top-center) for controller connect messages.
