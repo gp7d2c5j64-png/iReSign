@@ -403,6 +403,21 @@ button.secondary {
   margin: 0;
 }
 .tab-btn.active { color: #f0c168; border-color: #d9a441; }
+.mode-btn {
+  flex: 1;
+  background: #1d212a;
+  color: #8d96a6;
+  border: 1px solid #2c313b;
+  padding: 11px;
+  font-size: 13px;
+  border-radius: 6px;
+  margin: 0;
+}
+.mode-btn.active {
+  color: #0a0c10;
+  background: linear-gradient(180deg, #f0c168, #d9a441);
+  border-color: #d9a441;
+}
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
@@ -515,6 +530,14 @@ button.secondary {
 
     <div class="tab-panel" id="tab-sticks">
       <div class="settings-group">
+        <h3>Control Mode</h3>
+        <div style="display:flex; gap:8px;">
+          <button class="mode-btn active" id="mode-touch" onclick="setInputMode('touch')">📱 Touch</button>
+          <button class="mode-btn" id="mode-remote" onclick="setInputMode('remote')">🎮 Remote</button>
+        </div>
+        <p class="info-text" style="margin:10px 0 0;">Touch uses the on-screen sticks. Remote hides them and flies with a connected gamepad / USB radio (Mode 2).</p>
+      </div>
+      <div class="settings-group">
         <h3>Virtual Sticks — Mode 2</h3>
         <div class="setting-row">
           <label>Size</label>
@@ -624,6 +647,7 @@ const config = {
   stickSize: 1.0, stickOpacity: 1.0, stickDeadzone: 0.08,
   rateSmooth: 0.13, // seconds — low-pass on commanded rates (less twitchy)
   propwash: 0.05,   // 0..1 — turbulence when descending through your own prop wake
+  inputMode: 'touch', // 'touch' = on-screen sticks; 'remote' = gamepad / USB radio
 };
 
 // Smoothed (low-passed) angular rates so quick stick jabs ramp in.
@@ -806,6 +830,24 @@ function setupGamepad() {
   window.addEventListener('gamepaddisconnected', () => { pad.engaged = false; });
 }
 
+// Switch between on-screen touch sticks and a physical controller.
+function setInputMode(mode) {
+  config.inputMode = mode;
+  const t = document.getElementById('mode-touch'), r = document.getElementById('mode-remote');
+  if (t) t.classList.toggle('active', mode === 'touch');
+  if (r) r.classList.toggle('active', mode === 'remote');
+  // Remote hides the on-screen stick rings (you fly with the controller);
+  // the ARM button stays available for convenience.
+  const disp = mode === 'touch' ? 'block' : 'none';
+  const zl = document.getElementById('zone-left'), zr = document.getElementById('zone-right');
+  if (zl) zl.style.display = disp;
+  if (zr) zr.style.display = disp;
+  if (mode === 'touch') {
+    pad.engaged = false;
+    sticks.left.gpActive = sticks.right.gpActive = false;
+  }
+}
+
 function gpDead(v) { return Math.abs(v) < 0.06 ? 0 : v; }
 
 // Controller "confirm" from the menu: resume if a flight is paused, else start.
@@ -816,6 +858,7 @@ function gamepadStart() {
 }
 
 function pollGamepad() {
+  if (config.inputMode !== 'remote') { pad.engaged = false; return; } // touch mode ignores the pad
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let g = null;
   for (const x of pads) { if (x) { g = x; break; } }
@@ -1405,6 +1448,7 @@ window.onload = () => {
   setupSticks();
   setupGamepad();
   setupMenu();
+  setInputMode(config.inputMode);
   updateRotateBanner();
   window.addEventListener('resize', updateRotateBanner);
   animate();
