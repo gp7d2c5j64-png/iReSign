@@ -373,6 +373,40 @@ button.secondary {
 .crash-card h2 { font-size: 20px; margin-bottom: 8px; }
 .crash-card p { font-size: 12px; color: #8d96a6; margin-bottom: 12px; }
 
+#calib-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: rgba(10, 12, 16, 0.94);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+#calib-overlay.show { display: flex; }
+.calib-card {
+  background: #1d212a;
+  border: 1px solid #d9a441;
+  border-radius: 10px;
+  padding: 22px 24px;
+  max-width: 460px;
+  width: 92%;
+  text-align: center;
+}
+.calib-card h2 { color: #f0c168; font-size: 16px; letter-spacing: 0.08em; }
+#calib-sub { color: #5ad1e6; font-size: 15px; font-weight: bold; margin: 10px 0 6px; }
+.calib-card p { color: #e9edf3; font-size: 13px; line-height: 1.5; margin-bottom: 12px; }
+#calib-readout {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  background: #12151b;
+  border: 1px solid #2c313b;
+  border-radius: 6px;
+  padding: 8px;
+  line-height: 1.8;
+  min-height: 34px;
+}
+
 .info-text {
   font-size: 12px;
   color: #8d96a6;
@@ -535,7 +569,11 @@ button.secondary {
           <button class="mode-btn active" id="mode-touch" onclick="setInputMode('touch')">📱 Touch</button>
           <button class="mode-btn" id="mode-remote" onclick="setInputMode('remote')">🎮 Remote</button>
         </div>
-        <p class="info-text" style="margin:10px 0 0;">Touch uses the on-screen sticks. Remote hides them and flies with a connected gamepad / USB radio (Mode 2).</p>
+        <div id="remote-panel" style="display:none; margin-top:10px;">
+          <div id="gp-status" style="font-size:11px; color:#8d96a6; font-family:'Share Tech Mono',monospace;">⚠ No controller — plug in (USB Joystick) &amp; move a stick</div>
+          <button class="secondary" style="width:100%; margin:8px 0 0;" onclick="startCalibration()">Calibrate Sticks</button>
+        </div>
+        <p class="info-text" style="margin:10px 0 0;">Touch uses the on-screen sticks. Remote flies with a gamepad / USB radio. <strong>RC radios (RadioMaster etc.) must be calibrated</strong> so the channels map correctly.</p>
       </div>
       <div class="settings-group">
         <h3>Virtual Sticks — Mode 2</h3>
@@ -622,6 +660,20 @@ button.secondary {
     <h2>💥 CRASHED</h2>
     <p id="crash-msg">Impact too hard!</p>
     <button onclick="resetCraft()">Reset Quad</button>
+  </div>
+</div>
+
+<!-- CONTROLLER CALIBRATION OVERLAY -->
+<div id="calib-overlay">
+  <div class="calib-card">
+    <h2 id="calib-title">Calibrate</h2>
+    <div id="calib-sub"></div>
+    <p id="calib-desc"></p>
+    <div id="calib-readout"></div>
+    <div style="margin-top:14px;">
+      <button id="calib-next" onclick="calibNext()">Next</button>
+      <button class="secondary" onclick="cancelCalibration()">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -1841,6 +1893,23 @@ function stickIsActive(s) {
    left stick = throttle (Y) + yaw (X), right stick = pitch (Y) + roll (X).
    ========================================================= */
 const pad = { engaged: false, prevButtons: [] };
+let gpMap = null; // calibrated channel map for RC radios / non-standard pads
+
+const CALIB_STEPS = [
+  ['Center the sticks', 'Leave both sticks centered (throttle where it naturally rests), then tap Next.'],
+  ['Throttle — full UP', 'Push the THROTTLE stick all the way UP and hold, then tap Next.'],
+  ['Throttle — full DOWN', 'Pull the THROTTLE stick all the way DOWN and hold, then tap Next.'],
+  ['Yaw — full RIGHT', 'Hold the YAW (rudder) stick fully RIGHT, then tap Next.'],
+  ['Pitch — full FORWARD', 'Hold the PITCH (elevator) stick fully FORWARD/UP, then tap Next.'],
+  ['Roll — full RIGHT', 'Hold the ROLL (aileron) stick fully RIGHT, then tap Finish.'],
+];
+const calib = { active: false, step: 0, baseline: [], used: new Set(), tmp: {} };
+
+function firstPad() {
+  const ps = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const x of ps) if (x) return x;
+  return null;
+}
 
 function setupGamepad() {
   window.addEventListener('gamepadconnected', e => {
@@ -1855,6 +1924,8 @@ function setInputMode(mode) {
   const t = document.getElementById('mode-touch'), r = document.getElementById('mode-remote');
   if (t) t.classList.toggle('active', mode === 'touch');
   if (r) r.classList.toggle('active', mode === 'remote');
+  const rp = document.getElementById('remote-panel');
+  if (rp) rp.style.display = mode === 'remote' ? 'block' : 'none';
   // Remote hides the on-screen stick rings (you fly with the controller);
   // the ARM button stays available for convenience.
   const disp = mode === 'touch' ? 'block' : 'none';
@@ -1876,29 +1947,112 @@ function gamepadStart() {
   else startFlight();
 }
 
+/* ---- Controller calibration: maps any radio's axis order / range / direction.
+   Needed for RC transmitters (RadioMaster etc.) whose channels don't follow
+   the standard gamepad layout and whose throttle is a full-range axis. ---- */
+function startCalibration() {
+  const g = firstPad();
+  if (!g) {
+    alert('No controller detected.\n\nPlug your radio in as a USB Joystick / Game Controller, move a stick to wake it, then try again.');
+    return;
+  }
+  setInputMode('remote');
+  calib.active = true; calib.step = 0; calib.baseline = []; calib.used = new Set(); calib.tmp = {};
+  document.getElementById('calib-overlay').classList.add('show');
+  showCalibStep();
+}
+function showCalibStep() {
+  const s = CALIB_STEPS[calib.step];
+  document.getElementById('calib-title').textContent = 'Calibrate ' + (calib.step + 1) + '/' + CALIB_STEPS.length;
+  document.getElementById('calib-sub').textContent = s[0];
+  document.getElementById('calib-desc').textContent = s[1];
+  document.getElementById('calib-next').textContent = calib.step >= CALIB_STEPS.length - 1 ? 'Finish' : 'Next';
+}
+function biggestDelta(ax) {
+  let bi = -1, bd = 0.12; // require a meaningful move
+  for (let i = 0; i < ax.length; i++) {
+    if (calib.used.has(i)) continue;
+    const d = Math.abs(ax[i] - (calib.baseline[i] || 0));
+    if (d > bd) { bd = d; bi = i; }
+  }
+  return bi;
+}
+function calibNext() {
+  const g = firstPad(); if (!g) return;
+  const ax = Array.from(g.axes);
+  switch (calib.step) {
+    case 0: calib.baseline = ax.slice(); break;
+    case 1: { const a = biggestDelta(ax); if (a < 0) return; calib.tmp.thrAxis = a; calib.tmp.thrHi = ax[a]; calib.used.add(a); } break;
+    case 2: calib.tmp.thrLo = ax[calib.tmp.thrAxis]; break;
+    case 3: { const a = biggestDelta(ax); if (a < 0) return; calib.tmp.yaw = { axis: a, center: calib.baseline[a] || 0, range: ax[a] - (calib.baseline[a] || 0) }; calib.used.add(a); } break;
+    case 4: { const a = biggestDelta(ax); if (a < 0) return; calib.tmp.pitch = { axis: a, center: calib.baseline[a] || 0, range: ax[a] - (calib.baseline[a] || 0) }; calib.used.add(a); } break;
+    case 5: {
+      const a = biggestDelta(ax); if (a < 0) return;
+      calib.tmp.roll = { axis: a, center: calib.baseline[a] || 0, range: ax[a] - (calib.baseline[a] || 0) };
+      gpMap = {
+        throttle: { axis: calib.tmp.thrAxis, lo: calib.tmp.thrLo, hi: calib.tmp.thrHi },
+        yaw: calib.tmp.yaw, pitch: calib.tmp.pitch, roll: calib.tmp.roll,
+      };
+      calib.active = false;
+      document.getElementById('calib-overlay').classList.remove('show');
+      controllerToast('🎮 Controller calibrated — ready to fly');
+      return;
+    }
+  }
+  calib.step++; showCalibStep();
+}
+function cancelCalibration() {
+  calib.active = false;
+  document.getElementById('calib-overlay').classList.remove('show');
+}
+function updateCalibReadout() {
+  const g = firstPad(); if (!g) return;
+  const ax = g.axes, big = calib.step > 0 ? biggestDelta(ax) : -1;
+  let html = '';
+  for (let i = 0; i < ax.length; i++) {
+    html += `<span style="display:inline-block;min-width:70px;color:${i === big ? '#39ff6a' : '#5b6577'}">A${i}: ${ax[i].toFixed(2)}</span>`;
+  }
+  document.getElementById('calib-readout').innerHTML = html;
+}
+
+// Read a calibrated spring-centered channel (-1..1) or the throttle (0..1).
+function readChan(ax, m) {
+  let r = m.range;
+  if (Math.abs(r) < 0.05) r = r < 0 ? -1 : 1;
+  return Math.max(-1, Math.min(1, ((ax[m.axis] || 0) - m.center) / r));
+}
+function readThrottle(ax, m) {
+  const span = (m.hi - m.lo) || 1;
+  return Math.max(0, Math.min(1, ((ax[m.axis] || 0) - m.lo) / span));
+}
+
 function pollGamepad() {
   if (config.inputMode !== 'remote') { pad.engaged = false; return; } // touch mode ignores the pad
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  let g = null;
-  for (const x of pads) { if (x) { g = x; break; } }
+  const g = firstPad();
   if (!g) { pad.engaged = false; return; }
-
   const ax = g.axes, bt = g.buttons;
-  // Engage only once real input arrives, so an idle connected pad doesn't
-  // stomp on touch/keyboard control.
-  if (!pad.engaged) {
-    if (ax.some(a => Math.abs(a) > 0.15) || bt.some(b => b && b.pressed)) pad.engaged = true;
-    else return;
-  }
 
-  const yaw   = gpDead(ax[0] || 0);
-  const thr   = gpDead(-(ax[1] || 0));
-  const roll  = gpDead(ax[2] || 0);
-  const pitch = gpDead(-(ax[3] || 0));
-  sticks.left.rawX  = yaw;   sticks.left.rawY  = Math.max(0, thr);
+  // During calibration, don't drive the model — just track buttons.
+  if (calib.active) { pad.prevButtons = bt.map(b => !!(b && b.pressed)); return; }
+
+  pad.engaged = true; // remote mode: the pad is in control whenever present
+
+  let yaw, thr, pitch, roll;
+  if (gpMap) {
+    thr   = readThrottle(ax, gpMap.throttle);
+    yaw   = gpDead(readChan(ax, gpMap.yaw));
+    pitch = gpDead(readChan(ax, gpMap.pitch));
+    roll  = gpDead(readChan(ax, gpMap.roll));
+  } else {
+    // Uncalibrated fallback: standard gamepad layout (Xbox/PS).
+    yaw   = gpDead(ax[0] || 0);
+    thr   = Math.max(0, gpDead(-(ax[1] || 0)));
+    roll  = gpDead(ax[2] || 0);
+    pitch = gpDead(-(ax[3] || 0));
+  }
+  sticks.left.rawX  = yaw;   sticks.left.rawY  = Math.max(0, Math.min(1, thr));
   sticks.right.rawX = roll;  sticks.right.rawY = pitch;
-  sticks.left.gpActive  = (yaw !== 0 || thr !== 0);
-  sticks.right.gpActive = (roll !== 0 || pitch !== 0);
+  sticks.left.gpActive = sticks.right.gpActive = true;
 
   const down = i => bt[i] && bt[i].pressed;
   const edge = i => down(i) && !pad.prevButtons[i];
@@ -1914,6 +2068,16 @@ function pollGamepad() {
     else if (state.flying) pauseMenu();
   }
   pad.prevButtons = bt.map(b => !!(b && b.pressed));
+}
+
+// Live controller status text on the menu's Remote panel.
+function updateGamepadStatus() {
+  const st = document.getElementById('gp-status');
+  if (!st || config.inputMode !== 'remote') return;
+  const g = firstPad();
+  st.textContent = g
+    ? '✅ ' + g.id.replace(/\(.*\)/, '').trim().slice(0, 30) + (gpMap ? ' — calibrated' : ' — tap Calibrate Sticks')
+    : '⚠ No controller — plug in (USB Joystick) & move a stick';
 }
 
 // Small transient toast (top-center) for controller connect messages.
@@ -2800,6 +2964,8 @@ function animate() {
   lastTime = now;
 
   pollGamepad();   // always poll so controller arm/reset work even when crashed/paused
+  if (calib.active) updateCalibReadout();
+  updateGamepadStatus();
   updatePhysics(dt);
   renderWorld();
   renderSticks();
