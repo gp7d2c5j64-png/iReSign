@@ -486,6 +486,14 @@ button.secondary {
           <span class="setting-val" id="val-expo-yaw">0.50</span>
         </div>
       </div>
+      <div class="settings-group">
+        <h3>Propwash</h3>
+        <div class="setting-row">
+          <label>Turbulence</label>
+          <input type="range" id="propwash" min="0" max="100" value="50">
+          <span class="setting-val" id="val-propwash">50%</span>
+        </div>
+      </div>
     </div>
 
     <div class="tab-panel" id="tab-camera">
@@ -613,6 +621,7 @@ const config = {
   camAngle: 30, camFov: 115,
   stickSize: 1.0, stickOpacity: 1.0, stickDeadzone: 0.08,
   rateSmooth: 0.13, // seconds — low-pass on commanded rates (less twitchy)
+  propwash: 0.5,    // 0..1 — turbulence when descending through your own prop wake
 };
 
 // Smoothed (low-passed) angular rates so quick stick jabs ramp in.
@@ -1014,11 +1023,75 @@ function initRenderer() {
 // Map our forward-Z world onto Three's -Z (keeps left/right correct).
 const MZ = (z) => -z;
 
+/* ---- Procedural textures (canvas -> CanvasTexture). No external assets, so
+   the offline build stays self-contained. Brick/tile maps are greyscale and
+   get tinted by each material's per-house colour. ---- */
+function _canvas(sz) { const c = document.createElement('canvas'); c.width = c.height = sz; return c; }
+function _tex(canvas, rx, ry) {
+  const t = new THREE.CanvasTexture(canvas);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(rx, ry);
+  t.encoding = THREE.sRGBEncoding;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+}
+function makeGrassTexture() {
+  const s = 256, c = _canvas(s), x = c.getContext('2d');
+  x.fillStyle = '#6d8a50'; x.fillRect(0, 0, s, s);
+  for (let i = 0; i < 1300; i++) { // mottled patches
+    x.fillStyle = `rgba(${40 + Math.random()*30},${70 + Math.random()*60},${45 + Math.random()*25},0.22)`;
+    x.beginPath(); x.arc(Math.random()*s, Math.random()*s, 6 + Math.random()*24, 0, 7); x.fill();
+  }
+  for (let i = 0; i < 5200; i++) { // fine blades
+    const px = Math.random()*s, py = Math.random()*s;
+    x.strokeStyle = `rgba(${45 + Math.random()*40},${95 + Math.random()*70},${50 + Math.random()*35},0.5)`;
+    x.beginPath(); x.moveTo(px, py); x.lineTo(px + (Math.random()*2-1)*1.5, py - 2 - Math.random()*3); x.stroke();
+  }
+  return _tex(c, 300, 300);
+}
+function makeBrickTexture() {
+  const s = 128, c = _canvas(s), x = c.getContext('2d');
+  x.fillStyle = '#9a9a9a'; x.fillRect(0, 0, s, s); // mortar
+  const bw = 32, bh = 16;
+  for (let row = 0, y = 0; y < s; row++, y += bh) {
+    const off = (row % 2) * (bw / 2);
+    for (let xp = -bw; xp < s; xp += bw) {
+      const v = 205 + Math.floor(Math.random() * 50);
+      x.fillStyle = `rgb(${v},${v},${v})`;
+      x.fillRect(xp + off + 1, y + 1, bw - 2, bh - 2);
+    }
+  }
+  return _tex(c, 3, 2);
+}
+function makeRoofTexture() {
+  const s = 128, c = _canvas(s), x = c.getContext('2d');
+  x.fillStyle = '#6f6f6f'; x.fillRect(0, 0, s, s); // grout
+  const tw = 20, th = 13;
+  for (let row = 0, y = 0; y < s + th; row++, y += th) {
+    const off = (row % 2) * (tw / 2);
+    for (let xp = -tw; xp < s; xp += tw) {
+      const v = 205 + Math.floor(Math.random() * 45);
+      x.fillStyle = `rgb(${v},${v},${v})`;
+      x.beginPath();
+      x.moveTo(xp + off, y);
+      x.lineTo(xp + off + tw, y);
+      x.lineTo(xp + off + tw, y + th * 0.45);
+      x.arc(xp + off + tw / 2, y + th * 0.45, tw / 2, 0, Math.PI);
+      x.closePath(); x.fill();
+    }
+  }
+  return _tex(c, 4, 4);
+}
+
 function buildScene() {
-  // Ground + grid
+  const grassTex = makeGrassTexture();
+  const brickTex = makeBrickTexture();
+  const roofTex = makeRoofTexture();
+
+  // Grassy ground (white base so the grass texture shows its true colours).
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(5000, 5000),
-    new THREE.MeshStandardMaterial({ color: 0x6f8a54, roughness: 0.97, metalness: 0.0 }));
+    new THREE.MeshStandardMaterial({ color: 0xffffff, map: grassTex, roughness: 0.97, metalness: 0.0 }));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
@@ -1038,14 +1111,14 @@ function buildScene() {
     const wallH = h.h * 0.72;
     const walls = new THREE.Mesh(
       new THREE.BoxGeometry(h.w, wallH, h.d),
-      new THREE.MeshStandardMaterial({ color: new THREE.Color(h.wallColor), roughness: 0.9, metalness: 0.0 }));
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(h.wallColor), map: brickTex, roughness: 0.92, metalness: 0.0 }));
     walls.position.y = wallH / 2; walls.castShadow = true; walls.receiveShadow = true;
     g.add(walls);
 
     const roofH = Math.max(1.4, h.h - wallH);
     const roof = new THREE.Mesh(
       new THREE.ConeGeometry(Math.hypot(h.w, h.d) * 0.42, roofH, 4),
-      new THREE.MeshStandardMaterial({ color: new THREE.Color(h.roofColor), roughness: 0.7, metalness: 0.0 }));
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(h.roofColor), map: roofTex, roughness: 0.7, metalness: 0.0 }));
     roof.position.y = wallH + roofH / 2; roof.rotation.y = Math.PI / 4; roof.castShadow = true;
     g.add(roof);
 
@@ -1232,6 +1305,7 @@ function setupMenu() {
   bindRange('rate-yaw-center', v => { config.centerYaw = v; }, v => v + '°/s', 'val-yaw-center');
   bindRange('expo-rp', v => { config.expoRP = v / 100; }, v => (v / 100).toFixed(2), 'val-expo-rp');
   bindRange('expo-yaw', v => { config.expoYaw = v / 100; }, v => (v / 100).toFixed(2), 'val-expo-yaw');
+  bindRange('propwash', v => { config.propwash = v / 100; }, v => v + '%', 'val-propwash');
 
   bindRange('cam-angle', v => { config.camAngle = v; }, v => v + '°', 'val-cam');
   bindRange('cam-fov', v => { config.camFov = v; }, v => v + '°', 'val-fov');
@@ -1379,9 +1453,27 @@ function updatePhysics(dt) {
     easedPitch += (pitchRate - easedPitch) * k;
     easedYaw   += (yawRate   - easedYaw)   * k;
 
+    // Propwash turbulence: sinking through your own prop wake shakes the quad.
+    // Strongest when descending under throttle at low-ish forward speed. Scales
+    // with the Propwash slider (config.propwash); adds noisy body-rate wobble.
+    let pwR = 0, pwP = 0, pwY = 0;
+    const sink = Math.max(0, -craft.vel[1]);
+    if (config.propwash > 0 && input.throttle > 0.05 && sink > 0.3) {
+      const airspeed = Math.hypot(craft.vel[0], craft.vel[1], craft.vel[2]);
+      const intensity = config.propwash * Math.min(1, sink / 5) * (1 - Math.min(1, airspeed / 22));
+      if (intensity > 0.002) {
+        const t = performance.now() / 1000;
+        const amp = intensity * 55 * Math.PI / 180; // up to ~55 deg/s of wobble
+        const noise = (a, b) => 0.7 * Math.sin(t * a) + 0.5 * Math.sin(t * b + 1.7) + 0.5 * (Math.random() * 2 - 1);
+        pwR = noise(34, 21) * amp;
+        pwP = noise(29, 25) * amp;
+        pwY = noise(15, 27) * amp * 0.35;
+      }
+    }
+
     // Body rates: x=pitch, y=yaw, z=roll (standard convention). Integrating in
     // the body frame lets banked pitch carve a coordinated turn.
-    craft.q = integrateBodyRates(craft.q, easedPitch, easedYaw, -easedRoll, dt);
+    craft.q = integrateBodyRates(craft.q, easedPitch + pwP, easedYaw + pwY, -easedRoll + pwR, dt);
     thrustMag = input.throttle * craft.maxThrust;
   } else {
     easedRoll = easedPitch = easedYaw = 0; // no residual commanded rate
