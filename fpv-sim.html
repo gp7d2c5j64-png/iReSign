@@ -1358,42 +1358,37 @@ function updatePhysics(dt) {
   // Throttle (left stick Y) — read first so the arm interlock can see it.
   input.throttle = Math.max(0, sticks.left.rawY);
 
-  // DISARMED: motors are off and the quad is frozen in place — it does not
-  // drift, fall, or rotate until the pilot arms. (Prevents ghost movement.)
-  if (!state.armed) {
-    craft.vel[0] = craft.vel[1] = craft.vel[2] = 0;
-    easedRoll = easedPitch = easedYaw = 0;
-    return;
+  // Motors only make thrust when ARMED. When disarmed the props stop, so there
+  // is no thrust and no control — but gravity still applies below, so the quad
+  // FALLS and lands (ground friction stops any slide; no ghost drift).
+  let thrustMag = 0;
+  if (state.armed) {
+    const yawStick = applyDeadzone(sticks.left.rawX);
+    const pitchStick = applyDeadzone(sticks.right.rawY);
+    const rollStick = applyDeadzone(sticks.right.rawX);
+
+    // Acro rate control (WikiFPV): sticks command BODY-frame angular velocity
+    // (deg/s -> rad/s). Centered sticks => zero rate => the quad holds attitude.
+    const rollRate  = rateResponse(rollStick,  config.centerRP,  config.rateRoll,  config.expoRP)  * Math.PI / 180;
+    const pitchRate = rateResponse(pitchStick, config.centerRP,  config.ratePitch, config.expoRP)  * Math.PI / 180;
+    const yawRate   = rateResponse(yawStick,   config.centerYaw, config.rateYaw,   config.expoYaw) * Math.PI / 180;
+
+    // Low-pass the commanded rates so the response ramps in (less twitchy).
+    const k = 1 - Math.exp(-dt / config.rateSmooth);
+    easedRoll  += (rollRate  - easedRoll)  * k;
+    easedPitch += (pitchRate - easedPitch) * k;
+    easedYaw   += (yawRate   - easedYaw)   * k;
+
+    // Body rates: x=pitch, y=yaw, z=roll (standard convention). Integrating in
+    // the body frame lets banked pitch carve a coordinated turn.
+    craft.q = integrateBodyRates(craft.q, easedPitch, easedYaw, -easedRoll, dt);
+    thrustMag = input.throttle * craft.maxThrust;
+  } else {
+    easedRoll = easedPitch = easedYaw = 0; // no residual commanded rate
   }
-
-  const yawStick = applyDeadzone(sticks.left.rawX);
-  const pitchStick = applyDeadzone(sticks.right.rawY);
-  const rollStick = applyDeadzone(sticks.right.rawX);
-
-  // Acro rate control (WikiFPV): sticks command BODY-frame angular velocity
-  // (deg/s -> rad/s). Centered sticks => zero rate => the quad simply holds
-  // its current attitude — no self-leveling.
-  const rollRate  = rateResponse(rollStick,  config.centerRP,  config.rateRoll,  config.expoRP)  * Math.PI / 180;
-  const pitchRate = rateResponse(pitchStick, config.centerRP,  config.ratePitch, config.expoRP)  * Math.PI / 180;
-  const yawRate   = rateResponse(yawStick,   config.centerYaw, config.rateYaw,   config.expoYaw) * Math.PI / 180;
-
-  // Low-pass the commanded rates so the response ramps in instead of snapping
-  // — takes the twitch out without adding noticeable lag.
-  const k = 1 - Math.exp(-dt / config.rateSmooth);
-  easedRoll  += (rollRate  - easedRoll)  * k;
-  easedPitch += (pitchRate - easedPitch) * k;
-  easedYaw   += (yawRate   - easedYaw)   * k;
-
-  // Body angular velocity vector: x = pitch (right axis), y = yaw (up axis),
-  // z = roll (forward axis). Signs give the standard convention: roll-right
-  // banks/drifts right, yaw-right turns right, stick-forward pitches nose-down
-  // to fly forward. Integrating these in the BODY frame is what lets banked
-  // pitch carve a coordinated turn.
-  craft.q = integrateBodyRates(craft.q, easedPitch, easedYaw, -easedRoll, dt);
 
   // Thrust acts along the body "up" axis, rotated into world space by the quat.
   const up = quatRotate(craft.q, 0, 1, 0);
-  const thrustMag = input.throttle * craft.maxThrust;
 
   // Quadratic air drag opposes velocity.
   const v = craft.vel;
