@@ -2106,15 +2106,21 @@ function updateCalibReadout() {
   document.getElementById('calib-readout').innerHTML = html;
 }
 
+// A channel source can be an axis OR a button (analog value), because Chrome
+// sometimes exposes a radio's extra channel(s) as buttons rather than axes.
+function inputVal(g, m) {
+  if (m.isButton) { const b = g.buttons[m.axis]; return b ? (b.value != null ? b.value : (b.pressed ? 1 : 0)) : 0; }
+  return g.axes[m.axis] || 0;
+}
 // Read a calibrated spring-centered channel (-1..1) or the throttle (0..1).
-function readChan(ax, m) {
+function readChan(g, m) {
   let r = m.range;
   if (Math.abs(r) < 0.05) r = r < 0 ? -1 : 1;
-  return Math.max(-1, Math.min(1, ((ax[m.axis] || 0) - m.center) / r));
+  return Math.max(-1, Math.min(1, (inputVal(g, m) - m.center) / r));
 }
-function readThrottle(ax, m) {
+function readThrottle(g, m) {
   const span = (m.hi - m.lo) || 1;
-  return Math.max(0, Math.min(1, ((ax[m.axis] || 0) - m.lo) / span));
+  return Math.max(0, Math.min(1, (inputVal(g, m) - m.lo) / span));
 }
 
 function pollGamepad() {
@@ -2130,10 +2136,10 @@ function pollGamepad() {
 
   let yaw, thr, pitch, roll;
   if (gpMap) {
-    thr   = readThrottle(ax, gpMap.throttle);
-    yaw   = gpDead(readChan(ax, gpMap.yaw));
-    pitch = gpDead(readChan(ax, gpMap.pitch));
-    roll  = gpDead(readChan(ax, gpMap.roll));
+    thr   = readThrottle(g, gpMap.throttle);
+    yaw   = gpDead(readChan(g, gpMap.yaw));
+    pitch = gpDead(readChan(g, gpMap.pitch));
+    roll  = gpDead(readChan(g, gpMap.roll));
   } else {
     // Uncalibrated fallback: standard gamepad layout (Xbox/PS).
     yaw   = gpDead(ax[0] || 0);
@@ -2176,27 +2182,28 @@ function updateGamepadStatus() {
   if (ch) {
     if (g && gpMap && !calib.active) {
       const ax = g.axes;
-      const thr = Math.round(readThrottle(ax, gpMap.throttle) * 100);
-      ch.textContent = `THR ${thr}%  YAW ${readChan(ax, gpMap.yaw).toFixed(2)}  PIT ${readChan(ax, gpMap.pitch).toFixed(2)}  ROL ${readChan(ax, gpMap.roll).toFixed(2)}`;
+      const thr = Math.round(readThrottle(g, gpMap.throttle) * 100);
+      ch.textContent = `THR ${thr}%  YAW ${readChan(g, gpMap.yaw).toFixed(2)}  PIT ${readChan(g, gpMap.pitch).toFixed(2)}  ROL ${readChan(g, gpMap.roll).toFixed(2)}`;
     } else ch.textContent = '';
   }
 }
 
 /* ---- Axis Monitor / Manual Map page: shows every axis live and lets you
    assign each channel to any axis (with invert). ---- */
-const axPage = { open: false, min: [], max: [] };
+const axPage = { open: false, min: [], max: [], bmin: [], bmax: [], selAx: 0, selBtn: 0 };
+const srcTok = m => (m && m.isButton ? 'b' : 'a') + (m ? m.axis : 0);
+const parseTok = t => ({ isButton: t[0] === 'b', idx: parseInt(t.slice(1), 10) });
 
 function openAxesPage() {
   const g = firstPad();
   if (!g) { alert('No controller detected.\n\nPlug your radio in as a USB Joystick, move a stick to wake it, then try again.'); return; }
   setInputMode('remote');
-  axPage.open = true; axPage.min = []; axPage.max = [];
-  buildAxisSelects(g.axes.length);
+  axPage.open = true; axPage.min = []; axPage.max = []; axPage.bmin = []; axPage.bmax = [];
+  buildAxisSelects(g.axes.length, g.buttons.length);
   if (gpMap) {
-    document.getElementById('map-throttle').value = gpMap.throttle.axis;
-    document.getElementById('map-yaw').value = gpMap.yaw.axis;
-    document.getElementById('map-pitch').value = gpMap.pitch.axis;
-    document.getElementById('map-roll').value = gpMap.roll.axis;
+    const setSel = (id, v) => { const el = document.getElementById(id); if ([...el.options].some(o => o.value === v)) el.value = v; };
+    setSel('map-throttle', srcTok(gpMap.throttle)); setSel('map-yaw', srcTok(gpMap.yaw));
+    setSel('map-pitch', srcTok(gpMap.pitch)); setSel('map-roll', srcTok(gpMap.roll));
     document.getElementById('inv-throttle').checked = gpMap.throttle.hi < gpMap.throttle.lo;
     document.getElementById('inv-yaw').checked = gpMap.yaw.range < 0;
     document.getElementById('inv-pitch').checked = gpMap.pitch.range < 0;
@@ -2204,69 +2211,75 @@ function openAxesPage() {
   }
   document.getElementById('axes-overlay').classList.add('show');
 }
-function buildAxisSelects(n) {
-  const m = Math.max(n, 8); // always offer at least axes 0-7
-  axPage.selCount = m;
-  const opts = Array.from({ length: m }, (_, i) => `<option value="${i}">Axis ${i}</option>`).join('');
+function buildAxisSelects(nAx, nBtn) {
+  const m = Math.max(nAx, 8); axPage.selAx = m; axPage.selBtn = nBtn || 0;
+  let opts = '';
+  for (let i = 0; i < m; i++) opts += `<option value="a${i}">Axis ${i}</option>`;
+  for (let i = 0; i < (nBtn || 0); i++) opts += `<option value="b${i}">Button ${i}</option>`;
   ['map-throttle', 'map-yaw', 'map-pitch', 'map-roll'].forEach((id, idx) => {
     const el = document.getElementById(id);
-    const keep = el.value; // preserve current selection on rebuild
+    const keep = el.value;
     el.innerHTML = opts;
-    el.value = (keep !== '' && keep != null) ? keep : Math.min(idx, m - 1);
+    el.value = (keep && [...el.options].some(o => o.value === keep)) ? keep : ('a' + Math.min(idx, m - 1));
   });
 }
-function closeAxesPage() {
-  axPage.open = false;
-  document.getElementById('axes-overlay').classList.remove('show');
-}
+function closeAxesPage() { axPage.open = false; document.getElementById('axes-overlay').classList.remove('show'); }
+
 function updateAxesPage() {
   const g = firstPad();
   const list = document.getElementById('axes-list');
   if (!g) { list.innerHTML = '<div style="color:#ff4d4d">No controller connected.</div>'; return; }
-  const ax = g.axes;
-  // If the controller now reports more axes than the dropdowns cover, rebuild.
-  if (ax.length > (axPage.selCount || 0)) buildAxisSelects(ax.length);
-  let html = '';
-  const rows = Math.max(ax.length, 8); // always show axes 0-7
-  for (let i = 0; i < rows; i++) {
-    const present = i < ax.length;
-    const v = present ? ax[i] : 0;
-    if (present) {
-      if (axPage.min[i] == null) { axPage.min[i] = v; axPage.max[i] = v; }
-      else { axPage.min[i] = Math.min(axPage.min[i], v); axPage.max[i] = Math.max(axPage.max[i], v); }
-    }
-    const pct = present ? Math.max(0, Math.min(100, (v + 1) / 2 * 100)) : 50;
-    const moving = present && (axPage.max[i] - axPage.min[i]) > 0.2;
+  const ax = g.axes, bt = g.buttons;
+  if (ax.length > axPage.selAx || bt.length > axPage.selBtn) buildAxisSelects(ax.length, bt.length);
+
+  const bar = (label, v, lo, hi, present, moving) => {
+    const pct = present ? Math.max(0, Math.min(100, (v - lo) / ((hi - lo) || 1) * 100)) : 50;
     const nameCol = !present ? '#3a3f47' : (moving ? '#39ff6a' : '#5ad1e6');
-    const barCol = moving ? '#39ff6a' : '#5b6577';
-    const valTxt = present ? v.toFixed(2) : 'n/a';
-    html += `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:11px;font-family:'Share Tech Mono',monospace">
-      <span style="width:32px;color:${nameCol}">A${i}</span>
-      <span style="flex:1;height:11px;background:#12151b;border:1px solid #2c313b;border-radius:5px;position:relative;overflow:hidden;opacity:${present ? 1 : 0.4}">
-        <span style="position:absolute;left:0;top:0;bottom:0;width:${pct}%;background:${barCol};opacity:0.85"></span>
-        <span style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#8d96a6"></span>
+    return `<div style="display:flex;align-items:center;gap:8px;margin:2px 0;font-size:11px;font-family:'Share Tech Mono',monospace">
+      <span style="width:34px;color:${nameCol}">${label}</span>
+      <span style="flex:1;height:10px;background:#12151b;border:1px solid #2c313b;border-radius:5px;position:relative;overflow:hidden;opacity:${present ? 1 : 0.4}">
+        <span style="position:absolute;left:0;top:0;bottom:0;width:${pct}%;background:${moving ? '#39ff6a' : '#5b6577'};opacity:0.85"></span>
       </span>
-      <span style="width:44px;text-align:right;color:${present ? '#e9edf3' : '#5b6577'}">${valTxt}</span></div>`;
+      <span style="width:44px;text-align:right;color:${present ? '#e9edf3' : '#5b6577'}">${present ? v.toFixed(2) : 'n/a'}</span></div>`;
+  };
+
+  let html = '';
+  const nA = Math.max(ax.length, 8);
+  for (let i = 0; i < nA; i++) {
+    const present = i < ax.length, v = present ? ax[i] : 0;
+    if (present) { axPage.min[i] = axPage.min[i] == null ? v : Math.min(axPage.min[i], v); axPage.max[i] = axPage.max[i] == null ? v : Math.max(axPage.max[i], v); }
+    html += bar('A' + i, v, -1, 1, present, present && (axPage.max[i] - axPage.min[i]) > 0.2);
+  }
+  // Buttons shown as analog inputs — a "missing" stick channel often lands here.
+  for (let i = 0; i < bt.length; i++) {
+    const v = bt[i] ? (bt[i].value != null ? bt[i].value : (bt[i].pressed ? 1 : 0)) : 0;
+    axPage.bmin[i] = axPage.bmin[i] == null ? v : Math.min(axPage.bmin[i], v);
+    axPage.bmax[i] = axPage.bmax[i] == null ? v : Math.max(axPage.bmax[i], v);
+    html += bar('B' + i, v, 0, 1, true, (axPage.bmax[i] - axPage.bmin[i]) > 0.2);
   }
   list.innerHTML = html;
-  const btns = g.buttons.map((b, i) => (b && b.pressed) ? 'B' + i : null).filter(Boolean).join(' ') || '—';
-  document.getElementById('axes-buttons').textContent = `${ax.length} axes found   ·   Buttons: ${btns}`;
+  document.getElementById('axes-buttons').textContent = `${ax.length} axes, ${bt.length} buttons found`;
 }
+
 function saveManualMap() {
   const g = firstPad(); if (!g) return;
-  const A = id => parseInt(document.getElementById(id).value, 10);
   const inv = id => document.getElementById(id).checked;
-  const rng = a => {
-    const mn = axPage.min[a] != null ? axPage.min[a] : -1;
-    const mx = axPage.max[a] != null ? axPage.max[a] : 1;
-    return { mn, mx, center: (mn + mx) / 2, half: ((mx - mn) / 2) || 1 };
+  const val = id => document.getElementById(id).value;
+  const rng = t => {
+    const { isButton, idx } = parseTok(t);
+    let mn = isButton ? axPage.bmin[idx] : axPage.min[idx];
+    let mx = isButton ? axPage.bmax[idx] : axPage.max[idx];
+    if (mn == null) mn = isButton ? 0 : -1;
+    if (mx == null) mx = 1;
+    return { isButton, idx, mn, mx, center: (mn + mx) / 2, half: ((mx - mn) / 2) || 1 };
   };
-  const tA = A('map-throttle'), tr = rng(tA);
+  const spring = (selId, invId) => { const r = rng(val(selId)); return { axis: r.idx, isButton: r.isButton, center: r.center, range: r.half * (inv(invId) ? -1 : 1) }; };
+  const t = rng(val('map-throttle'));
   gpMap = {
-    throttle: inv('inv-throttle') ? { axis: tA, lo: tr.mx, hi: tr.mn } : { axis: tA, lo: tr.mn, hi: tr.mx },
-    yaw:   { axis: A('map-yaw'),   center: rng(A('map-yaw')).center,   range: rng(A('map-yaw')).half   * (inv('inv-yaw')   ? -1 : 1) },
-    pitch: { axis: A('map-pitch'), center: rng(A('map-pitch')).center, range: rng(A('map-pitch')).half * (inv('inv-pitch') ? -1 : 1) },
-    roll:  { axis: A('map-roll'),  center: rng(A('map-roll')).center,  range: rng(A('map-roll')).half  * (inv('inv-roll')  ? -1 : 1) },
+    throttle: inv('inv-throttle')
+      ? { axis: t.idx, isButton: t.isButton, lo: t.mx, hi: t.mn }
+      : { axis: t.idx, isButton: t.isButton, lo: t.mn, hi: t.mx },
+    yaw: spring('map-yaw', 'inv-yaw'), pitch: spring('map-pitch', 'inv-pitch'), roll: spring('map-roll', 'inv-roll'),
   };
   closeAxesPage();
   controllerToast('🎮 Mapping saved');
