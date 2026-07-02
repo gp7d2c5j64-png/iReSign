@@ -541,7 +541,7 @@ button.secondary {
         <strong>ARM</strong> first (throttle must be at zero — safety interlock). Tap ARM (or press <kbd>Space</kbd>) anytime to disarm and cut motors instantly.<br><br>
         Fly through the <strong>gold gates</strong> down the street. Land gently (under ~4.5 m/s) to touch down safely — hit harder and you'll crash and need to reset.<br><br>
         <strong>Keyboard:</strong> throttle <kbd>W</kbd>/<kbd>S</kbd>, yaw <kbd>A</kbd>/<kbd>D</kbd>, pitch <kbd>↑</kbd>/<kbd>↓</kbd>, roll <kbd>←</kbd>/<kbd>→</kbd>, arm <kbd>Space</kbd>, reset <kbd>R</kbd>.<br><br>
-        <strong>Controller:</strong> plug in a gamepad or USB radio (Mode 2) — left stick throttle/yaw, right stick pitch/roll. <kbd>A</kbd>/Start arms, <kbd>B</kbd>/Select resets. Just move a stick to activate it.
+        <strong>Controller:</strong> plug in a gamepad or USB radio (Mode 2) — left stick throttle/yaw, right stick pitch/roll. On this menu <kbd>A</kbd>/Start begins (or resumes) the flight; in the air <kbd>A</kbd> arms, <kbd>B</kbd> pauses back here, and <kbd>B</kbd> resets after a crash.
       </p>
     </div>
 
@@ -808,6 +808,13 @@ function setupGamepad() {
 
 function gpDead(v) { return Math.abs(v) < 0.06 ? 0 : v; }
 
+// Controller "confirm" from the menu: resume if a flight is paused, else start.
+function gamepadStart() {
+  const resumeBtn = document.getElementById('btn-resume');
+  if (resumeBtn && resumeBtn.style.display !== 'none') resumeFlight();
+  else startFlight();
+}
+
 function pollGamepad() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let g = null;
@@ -833,8 +840,17 @@ function pollGamepad() {
 
   const down = i => bt[i] && bt[i].pressed;
   const edge = i => down(i) && !pad.prevButtons[i];
-  if ((edge(0) || edge(9)) && state.flying) toggleArm();      // A / Start -> arm
-  if ((edge(1) || edge(8)) && state.crashed) resetCraft();    // B / Select -> reset
+  // A / Start: on the menu or a crash it starts/resumes/resets; in flight it arms.
+  if (edge(0) || edge(9)) {
+    if (state.crashed) resetCraft();
+    else if (!state.flying) gamepadStart();
+    else toggleArm();
+  }
+  // B / Select: reset after a crash, otherwise pause back to the menu.
+  if (edge(1) || edge(8)) {
+    if (state.crashed) resetCraft();
+    else if (state.flying) pauseMenu();
+  }
   pad.prevButtons = bt.map(b => !!(b && b.pressed));
 }
 
