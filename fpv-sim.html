@@ -739,6 +739,13 @@ function applyDeadzone(v) {
   return Math.sign(v) * (Math.abs(v) - dz) / (1 - dz);
 }
 
+// Throttle uses the FULL left-stick travel: bottom (rawY -1) = 0%, top (+1) =
+// 100%, so mid-stick is 50%. The stick rests at the bottom (0%) so you must
+// bring it down to arm.
+function throttleFromStick() {
+  return Math.max(0, Math.min(1, (sticks.left.rawY + 1) / 2));
+}
+
 function beginStick(stickName, zoneEl, id, clientX, clientY) {
   const s = sticks[stickName];
   if (s.id !== null) return; // already tracking one input per stick
@@ -845,7 +852,7 @@ function applyKeyboard(dt) {
   if (L.id === null) {
     let touched = false;
     if (keys['KeyW']) { L.rawY = Math.min(1, L.rawY + dt * 1.4); touched = true; }
-    if (keys['KeyS']) { L.rawY = Math.max(0, L.rawY - dt * 1.4); touched = true; }
+    if (keys['KeyS']) { L.rawY = Math.max(-1, L.rawY - dt * 1.4); touched = true; } // down to bottom (0%)
     let yaw = 0;
     if (keys['KeyA']) yaw -= 1;
     if (keys['KeyD']) yaw += 1;
@@ -1089,7 +1096,9 @@ function pollGamepad() {
     roll  = gpDead(ax[2] || 0);
     pitch = gpDead(-(ax[3] || 0));
   }
-  sticks.left.rawX  = yaw;   sticks.left.rawY  = Math.max(0, Math.min(1, thr));
+  // Store throttle (0..1) as a full-range stick position (-1..1) so it feeds
+  // the same throttleFromStick() mapping as touch/keyboard.
+  sticks.left.rawX  = yaw;   sticks.left.rawY  = Math.max(0, Math.min(1, thr)) * 2 - 1;
   sticks.right.rawX = roll;  sticks.right.rawY = pitch;
   sticks.left.gpActive = sticks.right.gpActive = true;
 
@@ -1757,7 +1766,7 @@ function startFlight() {
   craft.vel = [0, 0, 0];
   craft.q = [1, 0, 0, 0];
   input.throttle = 0;
-  sticks.left.id = null; sticks.left.rawX = 0; sticks.left.rawY = 0; sticks.left.kbActive = false;
+  sticks.left.id = null; sticks.left.rawX = 0; sticks.left.rawY = -1; sticks.left.kbActive = false; // throttle at bottom (0%)
   sticks.right.id = null; sticks.right.rawX = 0; sticks.right.rawY = 0; sticks.right.kbActive = false;
 
   document.getElementById('overlay').classList.add('hidden');
@@ -1786,7 +1795,7 @@ function quitFlight() {
 }
 
 function toggleArm() {
-  if (!state.armed && input.throttle > 0.05) {
+  if (!state.armed && throttleFromStick() > 0.05) {
     const toast = document.getElementById('arm-toast');
     toast.classList.add('show');
     setTimeout(() => toast.classList.remove('show'), 1500);
@@ -1820,7 +1829,7 @@ function resetCraft() {
   state.armed = false;
   state.leavingMapWarningSent = false;
   input.throttle = 0;
-  sticks.left.rawY = 0;
+  sticks.left.rawY = -1; // throttle back to bottom (0%)
   document.getElementById('crash-overlay').classList.remove('show');
   updateArmUI();
 }
@@ -1842,7 +1851,7 @@ function updatePhysics(dt) {
   applyKeyboard(dt);
 
   // Throttle (left stick Y) — read first so the arm interlock can see it.
-  input.throttle = Math.max(0, sticks.left.rawY);
+  input.throttle = throttleFromStick();
 
   // Motors only make thrust when ARMED. When disarmed the props stop, so there
   // is no thrust and no control — but gravity still applies below, so the quad
