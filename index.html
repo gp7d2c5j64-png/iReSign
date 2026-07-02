@@ -388,7 +388,9 @@ button.secondary {
 .map-row { display: flex; align-items: center; gap: 10px; margin: 7px 0; font-size: 13px; color: #e9edf3; }
 .map-row span { flex: 0 0 70px; }
 .map-row select { background: #12151b; color: #e9edf3; border: 1px solid #2c313b; border-radius: 5px; padding: 5px; flex: 1; }
-.map-row label { color: #8d96a6; font-size: 12px; display: flex; align-items: center; gap: 4px; }
+.map-row label { color: #8d96a6; font-size: 12px; display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.map-row .mini { flex: 0 0 auto; margin: 0; padding: 5px 9px; font-size: 11px; background: #1d212a; color: #f0c168; border: 1px solid #5b6577; border-radius: 5px; }
+.map-row select { flex: 1 1 auto; min-width: 0; }
 .calib-card {
   background: #1d212a;
   border: 1px solid #d9a441;
@@ -678,10 +680,11 @@ button.secondary {
     <div id="axes-list"></div>
     <div id="axes-buttons" style="font-family:'Share Tech Mono',monospace; font-size:11px; color:#8d96a6; margin-top:6px;">Buttons: —</div>
     <div style="border-top:1px solid #2c313b; margin:12px 0; padding-top:10px; text-align:left;">
-      <div class="map-row"><span>Throttle</span><select id="map-throttle"></select><label><input type="checkbox" id="inv-throttle"> invert</label></div>
-      <div class="map-row"><span>Yaw</span><select id="map-yaw"></select><label><input type="checkbox" id="inv-yaw"> invert</label></div>
-      <div class="map-row"><span>Pitch</span><select id="map-pitch"></select><label><input type="checkbox" id="inv-pitch"> invert</label></div>
-      <div class="map-row"><span>Roll</span><select id="map-roll"></select><label><input type="checkbox" id="inv-roll"> invert</label></div>
+      <div class="map-row"><span>Throttle</span><select id="map-throttle"></select><button class="mini" onclick="startDetect('throttle')">Detect</button><label><input type="checkbox" id="inv-throttle"> inv</label></div>
+      <div class="map-row"><span>Yaw</span><select id="map-yaw"></select><button class="mini" onclick="startDetect('yaw')">Detect</button><label><input type="checkbox" id="inv-yaw"> inv</label></div>
+      <div class="map-row"><span>Pitch</span><select id="map-pitch"></select><button class="mini" onclick="startDetect('pitch')">Detect</button><label><input type="checkbox" id="inv-pitch"> inv</label></div>
+      <div class="map-row"><span>Roll</span><select id="map-roll"></select><button class="mini" onclick="startDetect('roll')">Detect</button><label><input type="checkbox" id="inv-roll"> inv</label></div>
+      <div id="detect-status" style="color:#5ad1e6; font-size:12px; min-height:16px; margin-top:6px; font-family:'Share Tech Mono',monospace;"></div>
     </div>
     <div>
       <button onclick="saveManualMap()">Save Mapping</button>
@@ -1171,7 +1174,7 @@ function updateGamepadStatus() {
 
 /* ---- Axis Monitor / Manual Map page: shows every axis live and lets you
    assign each channel to any axis (with invert). ---- */
-const axPage = { open: false, min: [], max: [], bmin: [], bmax: [], selAx: 0, selBtn: 0 };
+const axPage = { open: false, min: [], max: [], bmin: [], bmax: [], selAx: 0, selBtn: 0, detect: null };
 const srcTok = m => (m && m.isButton ? 'b' : 'a') + (m ? m.axis : 0);
 const parseTok = t => ({ isButton: t[0] === 'b', idx: parseInt(t.slice(1), 10) });
 
@@ -1179,7 +1182,7 @@ function openAxesPage() {
   const g = firstPad();
   if (!g) { alert('No controller detected.\n\nPlug your radio in as a USB Joystick, move a stick to wake it, then try again.'); return; }
   setInputMode('remote');
-  axPage.open = true; axPage.min = []; axPage.max = []; axPage.bmin = []; axPage.bmax = [];
+  axPage.open = true; axPage.detect = null; axPage.min = []; axPage.max = []; axPage.bmin = []; axPage.bmax = [];
   // Snapshot the resting position (sticks assumed centered, throttle at rest)
   // so spring channels use this as their true center, not the min/max midpoint.
   axPage.baseline = Array.from(g.axes);
@@ -1208,7 +1211,44 @@ function buildAxisSelects(nAx, nBtn) {
     el.value = (keep && [...el.options].some(o => o.value === keep)) ? keep : ('a' + Math.min(idx, m - 1));
   });
 }
-function closeAxesPage() { axPage.open = false; document.getElementById('axes-overlay').classList.remove('show'); }
+function closeAxesPage() { axPage.open = false; axPage.detect = null; document.getElementById('axes-overlay').classList.remove('show'); }
+
+// Auto-detect a channel: capture a baseline, then over ~2.5s find the axis OR
+// button that moves most while you waggle that one stick.
+function startDetect(channel) {
+  const g = firstPad();
+  const s = document.getElementById('detect-status');
+  if (!g) { s.textContent = 'No controller detected.'; return; }
+  axPage.detect = {
+    channel, endTime: performance.now() + 2500,
+    base: Array.from(g.axes),
+    bbase: g.buttons.map(b => b ? (b.value != null ? b.value : (b.pressed ? 1 : 0)) : 0),
+    bestTok: null, bestDelta: 0,
+  };
+  s.textContent = 'Move the ' + channel.toUpperCase() + ' stick fully now…';
+}
+function tickDetect(ax, bt) {
+  const d = axPage.detect; if (!d) return;
+  for (let i = 0; i < ax.length; i++) { const dl = Math.abs(ax[i] - (d.base[i] || 0)); if (dl > d.bestDelta) { d.bestDelta = dl; d.bestTok = 'a' + i; } }
+  for (let i = 0; i < bt.length; i++) {
+    const v = bt[i] ? (bt[i].value != null ? bt[i].value : (bt[i].pressed ? 1 : 0)) : 0;
+    const dl = Math.abs(v - (d.bbase[i] || 0)); if (dl > d.bestDelta) { d.bestDelta = dl; d.bestTok = 'b' + i; }
+  }
+  const s = document.getElementById('detect-status');
+  const remain = (d.endTime - performance.now()) / 1000;
+  if (remain > 0) {
+    s.textContent = `Move ${d.channel.toUpperCase()} fully… ${remain.toFixed(1)}s` + (d.bestTok ? `  (best: ${d.bestTok.toUpperCase()} ${d.bestDelta.toFixed(2)})` : '');
+  } else {
+    if (d.bestDelta > 0.15 && d.bestTok) {
+      const sel = document.getElementById('map-' + d.channel);
+      if ([...sel.options].some(o => o.value === d.bestTok)) sel.value = d.bestTok;
+      s.textContent = `✓ ${d.channel.toUpperCase()} = ${d.bestTok.toUpperCase()}`;
+    } else {
+      s.textContent = `No movement for ${d.channel.toUpperCase()} — that channel isn't reaching the browser (check the radio's USB Joystick mode / channel mix).`;
+    }
+    axPage.detect = null;
+  }
+}
 
 function updateAxesPage() {
   const g = firstPad();
@@ -1244,6 +1284,7 @@ function updateAxesPage() {
   }
   list.innerHTML = html;
   document.getElementById('axes-buttons').textContent = `${ax.length} axes, ${bt.length} buttons found`;
+  tickDetect(ax, bt);
 }
 
 function saveManualMap() {
