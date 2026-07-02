@@ -2205,9 +2205,14 @@ function openAxesPage() {
   document.getElementById('axes-overlay').classList.add('show');
 }
 function buildAxisSelects(n) {
-  const opts = Array.from({ length: n }, (_, i) => `<option value="${i}">Axis ${i}</option>`).join('');
+  const m = Math.max(n, 8); // always offer at least axes 0-7
+  axPage.selCount = m;
+  const opts = Array.from({ length: m }, (_, i) => `<option value="${i}">Axis ${i}</option>`).join('');
   ['map-throttle', 'map-yaw', 'map-pitch', 'map-roll'].forEach((id, idx) => {
-    const el = document.getElementById(id); el.innerHTML = opts; el.value = Math.min(idx, n - 1);
+    const el = document.getElementById(id);
+    const keep = el.value; // preserve current selection on rebuild
+    el.innerHTML = opts;
+    el.value = (keep !== '' && keep != null) ? keep : Math.min(idx, m - 1);
   });
 }
 function closeAxesPage() {
@@ -2219,22 +2224,33 @@ function updateAxesPage() {
   const list = document.getElementById('axes-list');
   if (!g) { list.innerHTML = '<div style="color:#ff4d4d">No controller connected.</div>'; return; }
   const ax = g.axes;
+  // If the controller now reports more axes than the dropdowns cover, rebuild.
+  if (ax.length > (axPage.selCount || 0)) buildAxisSelects(ax.length);
   let html = '';
-  for (let i = 0; i < ax.length; i++) {
-    if (axPage.min[i] == null) { axPage.min[i] = ax[i]; axPage.max[i] = ax[i]; }
-    else { axPage.min[i] = Math.min(axPage.min[i], ax[i]); axPage.max[i] = Math.max(axPage.max[i], ax[i]); }
-    const v = ax[i], pct = Math.max(0, Math.min(100, (v + 1) / 2 * 100)), moving = (axPage.max[i] - axPage.min[i]) > 0.2;
+  const rows = Math.max(ax.length, 8); // always show axes 0-7
+  for (let i = 0; i < rows; i++) {
+    const present = i < ax.length;
+    const v = present ? ax[i] : 0;
+    if (present) {
+      if (axPage.min[i] == null) { axPage.min[i] = v; axPage.max[i] = v; }
+      else { axPage.min[i] = Math.min(axPage.min[i], v); axPage.max[i] = Math.max(axPage.max[i], v); }
+    }
+    const pct = present ? Math.max(0, Math.min(100, (v + 1) / 2 * 100)) : 50;
+    const moving = present && (axPage.max[i] - axPage.min[i]) > 0.2;
+    const nameCol = !present ? '#3a3f47' : (moving ? '#39ff6a' : '#5ad1e6');
+    const barCol = moving ? '#39ff6a' : '#5b6577';
+    const valTxt = present ? v.toFixed(2) : 'n/a';
     html += `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:11px;font-family:'Share Tech Mono',monospace">
-      <span style="width:32px;color:${moving ? '#39ff6a' : '#5ad1e6'}">A${i}</span>
-      <span style="flex:1;height:11px;background:#12151b;border:1px solid #2c313b;border-radius:5px;position:relative;overflow:hidden">
-        <span style="position:absolute;left:0;top:0;bottom:0;width:${pct}%;background:${moving ? '#39ff6a' : '#5b6577'};opacity:0.85"></span>
+      <span style="width:32px;color:${nameCol}">A${i}</span>
+      <span style="flex:1;height:11px;background:#12151b;border:1px solid #2c313b;border-radius:5px;position:relative;overflow:hidden;opacity:${present ? 1 : 0.4}">
+        <span style="position:absolute;left:0;top:0;bottom:0;width:${pct}%;background:${barCol};opacity:0.85"></span>
         <span style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#8d96a6"></span>
       </span>
-      <span style="width:44px;text-align:right;color:#e9edf3">${v.toFixed(2)}</span></div>`;
+      <span style="width:44px;text-align:right;color:${present ? '#e9edf3' : '#5b6577'}">${valTxt}</span></div>`;
   }
   list.innerHTML = html;
   const btns = g.buttons.map((b, i) => (b && b.pressed) ? 'B' + i : null).filter(Boolean).join(' ') || '—';
-  document.getElementById('axes-buttons').textContent = 'Buttons: ' + btns;
+  document.getElementById('axes-buttons').textContent = `${ax.length} axes found   ·   Buttons: ${btns}`;
 }
 function saveManualMap() {
   const g = firstPad(); if (!g) return;
