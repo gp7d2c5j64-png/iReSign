@@ -172,12 +172,12 @@ button.secondary {
 
 .hud-bottom {
   position: absolute;
-  bottom: 200px;
+  top: 16px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(20, 23, 29, 0.7);
   border: 1px solid #2c313b;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border-radius: 4px;
   font-size: 11px;
   color: #39ff6a;
@@ -1922,12 +1922,17 @@ function buildNeighborhood() {
     });
   });
 
-  const palmSpots = [
-    [-9, -10], [-9, 4], [-8, 20], [-9, 38], [-8, 56], [-9, 72],
-    [9, 0], [9.5, 16], [9, 36], [9.5, 54], [9, 70],
-    [24, -4], [-24, 24], [26, 40],
-  ];
-  palmSpots.forEach(([x, z]) => {
+  // Palm trees: one per house, planted 5 m out from the street-facing wall
+  // (keeps them clear of the houses and out of the takeoff sightline), plus a
+  // few decorative ones in the open/pool areas.
+  world.houses.forEach(h => {
+    const side = h.x < 0 ? 1 : -1; // toward the street (x = 0)
+    world.palms.push({
+      x: h.x + side * (h.w / 2 + 5), z: h.z,
+      h: 7 + Math.random() * 2.5, lean: (Math.random() - 0.5) * 0.15,
+    });
+  });
+  [[24, -4], [26, 40], [-24, 24]].forEach(([x, z]) => {
     world.palms.push({ x, z, h: 7 + Math.random() * 2.5, lean: (Math.random() - 0.5) * 0.15 });
   });
 
@@ -2102,10 +2107,25 @@ function makeRoofTexture() {
   return _tex(c, 4, 4);
 }
 
+function makeConcreteTexture() {
+  const s = 128, c = _canvas(s), x = c.getContext('2d');
+  x.fillStyle = '#c9c5bb'; x.fillRect(0, 0, s, s);
+  for (let i = 0; i < 2600; i++) { // speckle
+    const v = 175 + Math.random() * 65;
+    x.fillStyle = `rgba(${v},${v},${Math.round(v*0.97)},0.14)`;
+    x.fillRect(Math.random()*s, Math.random()*s, 1.6, 1.6);
+  }
+  x.strokeStyle = 'rgba(90,88,82,0.45)'; x.lineWidth = 2; // expansion joints
+  x.beginPath(); x.moveTo(0, s/2); x.lineTo(s, s/2); x.stroke();
+  x.beginPath(); x.moveTo(s/2, 0); x.lineTo(s/2, s); x.stroke();
+  return c;
+}
+
 function buildScene() {
   const grassTex = makeGrassTexture();
   const brickTex = makeBrickTexture();
   const roofTex = makeRoofTexture();
+  const concreteCanvas = makeConcreteTexture();
 
   // Grassy ground (white base so the grass texture shows its true colours).
   const ground = new THREE.Mesh(
@@ -2123,6 +2143,35 @@ function buildScene() {
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
   road.rotation.x = -Math.PI / 2; road.position.y = 0.04; road.receiveShadow = true;
   scene.add(road);
+
+  // Sidewalks flanking the road (concrete panels via the joint-lined texture).
+  const sidewalkTex = _tex(concreteCanvas, 1, 1600);
+  [-6.3, 6.3].forEach(sx => {
+    const sw = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.4, 5000),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, map: sidewalkTex, roughness: 0.95, metalness: 0.0,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+    sw.rotation.x = -Math.PI / 2; sw.position.set(sx, 0.03, 0); sw.receiveShadow = true;
+    scene.add(sw);
+  });
+
+  // Driveways: concrete rectangles linking each house to the street.
+  const drivewayMat = new THREE.MeshStandardMaterial({ color: 0xf0ece2, map: _tex(concreteCanvas, 2, 3),
+    roughness: 0.95, metalness: 0.0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  world.driveways.forEach(d => {
+    const dw = new THREE.Mesh(new THREE.PlaneGeometry(d.w, d.l), drivewayMat);
+    dw.rotation.x = -Math.PI / 2; dw.position.set(d.x, 0.035, MZ(d.z)); dw.receiveShadow = true;
+    scene.add(dw);
+  });
+
+  // Scattered dirt patches on the grass for variation.
+  const dirtMat = new THREE.MeshStandardMaterial({ color: 0x7a6248, roughness: 1.0, metalness: 0.0,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  [[-11, 8], [12, 24], [-13, 44], [22, 12], [-22, 30], [13, 60]].forEach(([px, pz]) => {
+    const patch = new THREE.Mesh(new THREE.CircleGeometry(1.4 + Math.random() * 1.6, 12), dirtMat);
+    patch.rotation.x = -Math.PI / 2; patch.position.set(px, 0.025, MZ(pz)); patch.receiveShadow = true;
+    scene.add(patch);
+  });
 
   // Houses: walls box + hip roof (4-sided cone), plus door/windows
   world.houses.forEach(h => {
@@ -2529,6 +2578,27 @@ function updatePhysics(dt) {
       craft.pos[1] = phys.groundY;
       v[1] = Math.max(0, v[1]);
       v[0] *= 0.85; v[2] *= 0.85; // ground friction
+    }
+  }
+
+  // Obstacle collisions — houses and trees are solid; hitting one crashes.
+  // (Physics uses world coords; rendering's Z-flip doesn't apply here.)
+  const cx = craft.pos[0], cy = craft.pos[1], cz = craft.pos[2], CR = 0.3;
+  for (const h of world.houses) {
+    if (cy < h.h + CR &&
+        cx > h.x - h.w / 2 - CR && cx < h.x + h.w / 2 + CR &&
+        cz > h.z - h.d / 2 - CR && cz < h.z + h.d / 2 + CR) {
+      triggerCrash('Hit a house!'); return;
+    }
+  }
+  for (const p of world.palms) {
+    // Trunk (thin vertical column) …
+    if (cy < p.h && Math.hypot(cx - p.x, cz - p.z) < 0.45 + CR) {
+      triggerCrash('Hit a tree!'); return;
+    }
+    // … and the canopy ball at the top.
+    if (Math.hypot(cx - p.x, cy - (p.h + 0.2), cz - p.z) < 2.0 + CR) {
+      triggerCrash('Hit a tree!'); return;
     }
   }
 
