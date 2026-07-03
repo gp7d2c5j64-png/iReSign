@@ -1782,8 +1782,8 @@ const sticks = {
 };
 const STICK_RADIUS_PX = 130; // matches .stick-container half-size minus knob margin (2x)
 
-function applyDeadzone(v) {
-  const dz = config.stickDeadzone;
+function applyDeadzone(v, dz = config.stickDeadzone) {
+  if (dz <= 0) return v;            // filtering off (controller mode) — pass raw
   if (Math.abs(v) < dz) return 0;
   return Math.sign(v) * (Math.abs(v) - dz) / (1 - dz);
 }
@@ -3181,9 +3181,14 @@ function updatePhysics(dt) {
   // FALLS and lands (ground friction stops any slide; no ghost drift).
   let thrustMag = 0;
   if (state.armed) {
-    const yawStick = applyDeadzone(sticks.left.rawX);
-    const pitchStick = applyDeadzone(sticks.right.rawY);
-    const rollStick = applyDeadzone(sticks.right.rawX);
+    // Input filtering (deadzone + rate smoothing) is ON for the on-screen touch
+    // sticks — they need it to feel controllable — but OFF for a physical
+    // controller, which is precise and already has its own radio-side filtering.
+    const filtering = config.inputMode !== 'remote';
+    const dz = filtering ? config.stickDeadzone : 0;
+    const yawStick = applyDeadzone(sticks.left.rawX, dz);
+    const pitchStick = applyDeadzone(sticks.right.rawY, dz);
+    const rollStick = applyDeadzone(sticks.right.rawX, dz);
 
     // Acro rate control (WikiFPV): sticks command BODY-frame angular velocity
     // (deg/s -> rad/s). Centered sticks => zero rate => the quad holds attitude.
@@ -3192,7 +3197,8 @@ function updatePhysics(dt) {
     const yawRate   = rateResponse(yawStick,   config.centerYaw, config.rateYaw,   config.expoYaw) * Math.PI / 180;
 
     // Low-pass the commanded rates so the response ramps in (less twitchy).
-    const k = 1 - Math.exp(-dt / config.rateSmooth);
+    // Controller mode uses k=1 (no smoothing) for an instant, direct 1:1 feel.
+    const k = filtering ? (1 - Math.exp(-dt / config.rateSmooth)) : 1;
     easedRoll  += (rollRate  - easedRoll)  * k;
     easedPitch += (pitchRate - easedPitch) * k;
     easedYaw   += (yawRate   - easedYaw)   * k;
