@@ -1445,7 +1445,7 @@ const phys = {
 /* =========================================================
    NEIGHBORHOOD WORLD (real 3D objects, perspective-projected)
    ========================================================= */
-const world = { houses: [], palms: [], pools: [], driveways: [], walls: [], gates: [] };
+const world = { houses: [], palms: [], jungle: [], bushes: [], driveways: [], walls: [], gates: [] };
 
 // Map boundary: flying past this radius from spawn triggers the "leaving map" warning.
 const MAP_BOUNDS = { radius: 95, warnMargin: 12 };
@@ -1488,7 +1488,48 @@ function buildNeighborhood() {
     world.palms.push({ x, z, h: 7 + Math.random() * 2.5, lean: (Math.random() - 0.5) * 0.15 });
   });
 
-  world.pools.push({ x: 24, z: 20, w: 8, l: 14 });
+  // Jungle: dense broadleaf trees filling the sides and the deep background,
+  // wrapping the neighbourhood in canopy. Kept clear of the central corridor
+  // (|x| < 11) and the house footprints so the gate line stays flyable.
+  const nearHouse = (x, z) => world.houses.some(h =>
+    Math.abs(x - h.x) < h.w / 2 + 2.5 && Math.abs(z - h.z) < h.d / 2 + 2.5);
+  let guard = 0;
+  while (world.jungle.length < 46 && guard++ < 4000) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    // Two bands: a mid band beside the houses, and a dense far wall of trees.
+    const band = Math.random();
+    const x = side * (band < 0.55 ? 20 + Math.random() * 16 : 40 + Math.random() * 26);
+    const z = -34 + Math.random() * 140;
+    if (Math.abs(x) < 11 || nearHouse(x, z)) continue;
+    world.jungle.push({
+      x, z,
+      h: 6.5 + Math.random() * 7.5,
+      lean: (Math.random() - 0.5) * 0.12,
+      spread: 2.4 + Math.random() * 1.8,
+      tint: Math.random(),
+      rot: Math.random() * Math.PI * 2,
+    });
+  }
+  // A few emergent giants poking above the canopy, further out.
+  [[-52, 18], [56, 40], [-58, 70], [60, 4], [-46, 100]].forEach(([x, z]) => {
+    world.jungle.push({ x, z, h: 15 + Math.random() * 4, lean: 0, spread: 3.6, tint: Math.random(), rot: Math.random() * 6.28 });
+  });
+
+  // Low undergrowth: ferns and leafy bushes scattered across the floor,
+  // including right up to the corridor edge for that overgrown feel.
+  guard = 0;
+  while (world.bushes.length < 90 && guard++ < 6000) {
+    const x = (Math.random() - 0.5) * 96;
+    const z = -30 + Math.random() * 138;
+    if (Math.abs(x) < 5.5 || nearHouse(x, z)) continue; // keep the road/takeoff clear
+    world.bushes.push({
+      x, z,
+      r: 0.7 + Math.random() * 1.3,
+      tint: Math.random(),
+      fern: Math.random() < 0.4,
+      rot: Math.random() * Math.PI * 2,
+    });
+  }
 
   houseSpecs.forEach(([x, z, w, d]) => {
     const side = x < 0 ? 1 : -1;
@@ -1536,7 +1577,9 @@ function initRenderer() {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9ec9e8);
-  scene.fog = new THREE.Fog(0xc4dded, 110, 560);
+  // Humid-jungle haze: greener tint, pulled in so the dense canopy fades to
+  // atmosphere in the distance (adds depth without hiding the play area).
+  scene.fog = new THREE.Fog(0xb9d6bf, 70, 340);
 
   camera3 = new THREE.PerspectiveCamera(config.camFov, 1, 0.1, 3000);
 
@@ -1825,13 +1868,73 @@ function buildScene() {
     scene.add(g);
   });
 
-  // Pools
-  world.pools.forEach(pool => {
-    const m = new THREE.Mesh(
-      new THREE.PlaneGeometry(pool.w, pool.l),
-      new THREE.MeshStandardMaterial({ color: 0x2a7fb8, roughness: 0.12, metalness: 0.2 }));
-    m.rotation.x = -Math.PI / 2; m.position.set(pool.x, 0.05, MZ(pool.z));
-    m.receiveShadow = true; scene.add(m);
+  // Jungle: broadleaf trees with a tapered trunk and a crown built from a few
+  // overlapping leaf blobs (varied greens), plus low bushes and ferns for
+  // undergrowth. Geometries/materials are shared for performance.
+  const jTrunkMat = new THREE.MeshStandardMaterial({ color: 0x6b5236, roughness: 0.95, metalness: 0.0 });
+  const leafMats = [0x2f6b2e, 0x3b8036, 0x275a26, 0x4c9a3f, 0x356e2a].map(c =>
+    new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.0, flatShading: true }));
+  const blobGeo = new THREE.IcosahedronGeometry(1, 1); // reused, scaled per blob
+  const trunkGeo = new THREE.CylinderGeometry(0.18, 0.5, 1, 8); // unit height, scaled
+
+  world.jungle.forEach(t => {
+    const g = new THREE.Group();
+    // Trunk (unit cylinder scaled to height), leaning slightly.
+    const trunk = new THREE.Mesh(trunkGeo, jTrunkMat);
+    trunk.scale.set(1, t.h, 1); trunk.position.y = t.h / 2;
+    trunk.rotation.z = t.lean; trunk.castShadow = true;
+    g.add(trunk);
+    const topX = Math.sin(t.lean) * t.h, topY = t.h;
+    // Canopy: a cluster of leaf blobs forming a broad, rounded crown.
+    const nBlobs = 5 + Math.floor(Math.random() * 4);
+    const baseMat = leafMats[Math.floor(t.tint * leafMats.length) % leafMats.length];
+    for (let i = 0; i < nBlobs; i++) {
+      const mat = i === 0 ? baseMat : leafMats[Math.floor(Math.random() * leafMats.length)];
+      const blob = new THREE.Mesh(blobGeo, mat);
+      const ang = Math.random() * Math.PI * 2, rad = i === 0 ? 0 : Math.random() * t.spread * 0.7;
+      const s = (i === 0 ? t.spread : t.spread * (0.5 + Math.random() * 0.4));
+      blob.position.set(topX + Math.cos(ang) * rad, topY + (Math.random() - 0.3) * t.spread * 0.5, Math.sin(ang) * rad);
+      blob.scale.set(s, s * 0.82, s);
+      blob.castShadow = true;
+      g.add(blob);
+    }
+    g.rotation.y = t.rot;
+    g.position.set(t.x, 0, MZ(t.z));
+    scene.add(g);
+  });
+
+  // Undergrowth: bushes (blob clusters) and ferns (radiating blades).
+  const bushMats = leafMats;
+  const fernGeo = new THREE.SphereGeometry(1, 8, 5);
+  fernGeo.scale(1.5, 0.09, 0.35); fernGeo.translate(1.5, 0, 0); // blade out +X
+  world.bushes.forEach(b => {
+    const g = new THREE.Group();
+    if (b.fern) {
+      const mat = bushMats[Math.floor(b.tint * bushMats.length) % bushMats.length];
+      const nB = 6 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < nB; i++) {
+        const blade = new THREE.Mesh(fernGeo, mat);
+        blade.scale.setScalar(b.r * (0.6 + Math.random() * 0.5));
+        blade.rotation.y = (i / nB) * Math.PI * 2;
+        blade.rotation.z = -0.15 - Math.random() * 0.25;
+        blade.castShadow = true;
+        g.add(blade);
+      }
+    } else {
+      const nB = 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < nB; i++) {
+        const mat = bushMats[Math.floor(Math.random() * bushMats.length)];
+        const blob = new THREE.Mesh(blobGeo, mat);
+        const s = b.r * (0.6 + Math.random() * 0.6);
+        blob.position.set((Math.random() - 0.5) * b.r, s * 0.55, (Math.random() - 0.5) * b.r);
+        blob.scale.set(s, s * 0.8, s);
+        blob.castShadow = true; blob.receiveShadow = true;
+        g.add(blob);
+      }
+    }
+    g.rotation.y = b.rot;
+    g.position.set(b.x, 0, MZ(b.z));
+    scene.add(g);
   });
 
   // Low garden walls
@@ -2156,6 +2259,16 @@ function updatePhysics(dt) {
     }
     // … and the canopy ball at the top.
     if (Math.hypot(cx - p.x, cy - (p.h + 0.2), cz - p.z) < 2.0 + CR) {
+      triggerCrash('Hit a tree!'); return;
+    }
+  }
+  for (const t of world.jungle) {
+    // Trunk column …
+    if (cy < t.h && Math.hypot(cx - t.x, cz - t.z) < 0.5 + CR) {
+      triggerCrash('Hit a tree!'); return;
+    }
+    // … and the leafy crown up top.
+    if (Math.hypot(cx - t.x, cy - (t.h + 0.2), cz - t.z) < t.spread + CR) {
       triggerCrash('Hit a tree!'); return;
     }
   }
