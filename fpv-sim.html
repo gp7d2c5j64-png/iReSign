@@ -685,6 +685,8 @@ button.secondary {
       <div class="map-row"><span>Yaw</span><select id="map-yaw"></select><button class="mini" onclick="startDetect('yaw')">Detect</button><label><input type="checkbox" id="inv-yaw"> inv</label></div>
       <div class="map-row"><span>Pitch</span><select id="map-pitch"></select><button class="mini" onclick="startDetect('pitch')">Detect</button><label><input type="checkbox" id="inv-pitch"> inv</label></div>
       <div class="map-row"><span>Roll</span><select id="map-roll"></select><button class="mini" onclick="startDetect('roll')">Detect</button><label><input type="checkbox" id="inv-roll"> inv</label></div>
+      <div class="map-row"><span>Arm/Disarm</span><select id="map-arm"></select><button class="mini" onclick="startDetect('arm')">Detect</button><label><input type="checkbox" id="inv-arm"> inv</label></div>
+      <div style="color:#8d96a6; font-size:11px; margin-top:4px;">Assign a 2-position switch to arm. Flip it up to arm (throttle must be down), down to disarm. Leave as “— none —” to arm with the button/on-screen ARM instead. Use <b>inv</b> if it’s reversed.</div>
       <div id="detect-status" style="color:#5ad1e6; font-size:12px; min-height:16px; margin-top:6px; font-family:'Share Tech Mono',monospace;"></div>
     </div>
     <div>
@@ -1153,6 +1155,16 @@ function pollGamepad() {
   sticks.right.rawX = roll;  sticks.right.rawY = pitch;
   sticks.left.gpActive = sticks.right.gpActive = true;
 
+  // Physical arm/disarm switch (level-based, like a real quad): switch high +
+  // throttle down = armed; switch low = disarmed. The throttle interlock still
+  // applies (won't arm with throttle up). Only active in flight.
+  if (gpMap && gpMap.arm && state.flying && !state.crashed) {
+    let wantArm = inputVal(g, gpMap.arm) > gpMap.arm.thresh;
+    if (gpMap.arm.inv) wantArm = !wantArm;
+    if (wantArm && !state.armed) { if (throttleFromStick() <= 0.05) toggleArm(); }
+    else if (!wantArm && state.armed) toggleArm();
+  }
+
   const down = i => bt[i] && bt[i].pressed;
   const edge = i => down(i) && !pad.prevButtons[i];
   // A / Start: on the menu or a crash it starts/resumes/resets; in flight it arms.
@@ -1212,6 +1224,10 @@ function openAxesPage() {
     document.getElementById('inv-yaw').checked = gpMap.yaw.range < 0;
     document.getElementById('inv-pitch').checked = gpMap.pitch.range < 0;
     document.getElementById('inv-roll').checked = gpMap.roll.range < 0;
+    if (gpMap.arm) {
+      setSel('map-arm', (gpMap.arm.isButton ? 'b' : 'a') + gpMap.arm.axis);
+      document.getElementById('inv-arm').checked = !!gpMap.arm.inv;
+    }
   }
   document.getElementById('axes-overlay').classList.add('show');
 }
@@ -1226,6 +1242,13 @@ function buildAxisSelects(nAx, nBtn) {
     el.innerHTML = opts;
     el.value = (keep && [...el.options].some(o => o.value === keep)) ? keep : ('a' + Math.min(idx, m - 1));
   });
+  // Arm is optional — it gets a "none" choice and defaults to unmapped.
+  const armEl = document.getElementById('map-arm');
+  if (armEl) {
+    const keep = armEl.value;
+    armEl.innerHTML = '<option value="">— none —</option>' + opts;
+    armEl.value = (keep && [...armEl.options].some(o => o.value === keep)) ? keep : '';
+  }
 }
 function closeAxesPage() { axPage.open = false; axPage.detect = null; document.getElementById('axes-overlay').classList.remove('show'); }
 
@@ -1334,6 +1357,17 @@ function saveManualMap() {
       : { axis: t.idx, isButton: t.isButton, lo: t.mn, hi: t.mx },
     yaw: spring('map-yaw', 'inv-yaw'), pitch: spring('map-pitch', 'inv-pitch'), roll: spring('map-roll', 'inv-roll'),
   };
+  // Arm switch (optional): a threshold channel. Armed when the input crosses the
+  // midpoint of its travel toward the high side (inv flips which side arms).
+  const armSel = val('map-arm');
+  if (armSel) {
+    const { isButton, idx } = parseTok(armSel);
+    let mn = isButton ? axPage.bmin[idx] : axPage.min[idx];
+    let mx = isButton ? axPage.bmax[idx] : axPage.max[idx];
+    if (mn == null) mn = isButton ? 0 : -1;
+    if (mx == null) mx = 1;
+    gpMap.arm = { isButton, axis: idx, thresh: (mn + mx) / 2, inv: inv('inv-arm') };
+  }
   closeAxesPage();
   controllerToast('🎮 Mapping saved');
 }
@@ -1370,7 +1404,7 @@ function renderSticks() {
    RATE CURVE MATH (Betaflight-style actual-rates approximation)
    ========================================================= */
 function rateResponse(stickVal, center, max, expo) {
-  const v = applyDeadzone(stickVal);
+  const v = stickVal; // already deadzoned by the caller (per input mode)
   if (v === 0) return 0;
   const a = Math.abs(v);
   const shaped = a * expo + a * a * (1 - expo);
@@ -2173,9 +2207,15 @@ function updatePhysics(dt) {
 
     // Acro rate control (WikiFPV): sticks command BODY-frame angular velocity
     // (deg/s -> rad/s). Centered sticks => zero rate => the quad holds attitude.
-    const rollRate  = rateResponse(rollStick,  config.centerRP,  config.rateRoll,  config.expoRP)  * Math.PI / 180;
-    const pitchRate = rateResponse(pitchStick, config.centerRP,  config.ratePitch, config.expoRP)  * Math.PI / 180;
-    const yawRate   = rateResponse(yawStick,   config.centerYaw, config.rateYaw,   config.expoYaw) * Math.PI / 180;
+    // Controller mode flies a hotter freestyle profile: 670°/s max, 0.30 expo.
+    const maxRoll  = filtering ? config.rateRoll  : 670;
+    const maxPitch = filtering ? config.ratePitch : 670;
+    const maxYaw   = filtering ? config.rateYaw   : 670;
+    const expoRP   = filtering ? config.expoRP    : 0.30;
+    const expoYaw  = filtering ? config.expoYaw   : 0.30;
+    const rollRate  = rateResponse(rollStick,  config.centerRP,  maxRoll,  expoRP)  * Math.PI / 180;
+    const pitchRate = rateResponse(pitchStick, config.centerRP,  maxPitch, expoRP)  * Math.PI / 180;
+    const yawRate   = rateResponse(yawStick,   config.centerYaw, maxYaw,   expoYaw) * Math.PI / 180;
 
     // Low-pass the commanded rates so the response ramps in (less twitchy).
     // Controller mode uses k=1 (no smoothing) for an instant, direct 1:1 feel.
