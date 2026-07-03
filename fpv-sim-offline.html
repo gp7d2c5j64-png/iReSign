@@ -1945,17 +1945,24 @@ const CALIB_STEPS = [
 const calib = { active: false, step: 0, baseline: [], axMin: [], axMax: [], tmp: {} };
 
 function firstPad() {
-  // RC radios often enumerate as TWO HID interfaces; if Chrome fills slot 0
-  // with the phantom one, a real gimbal channel goes "missing". Always pick the
-  // richest pad — the most axes+buttons — so we read the real joystick.
+  // RC radios often enumerate as TWO+ HID interfaces and SPLIT their channels
+  // across them, so a gimbal can live on a device we'd otherwise ignore. Rather
+  // than pick one, MERGE every connected device into a single channel list —
+  // axes then buttons, device by device, in stable slot order — so no channel
+  // can ever be missing regardless of how the OS carves them up. Index i in the
+  // merged .axes maps to a fixed (device, local-axis) pair every frame.
   const ps = navigator.getGamepads ? navigator.getGamepads() : [];
-  let best = null, bestScore = -1;
-  for (const x of ps) {
-    if (!x) continue;
-    const score = (x.axes ? x.axes.length : 0) + (x.buttons ? x.buttons.length : 0);
-    if (score > bestScore) { bestScore = score; best = x; }
+  const live = [];
+  for (const x of ps) if (x && x.connected !== false) live.push(x);
+  if (!live.length) return null;
+  if (live.length === 1) return live[0];
+  const axes = [], buttons = [], ids = [];
+  for (const x of live) {
+    ids.push(x.id.replace(/\(.*\)/, '').trim().slice(0, 18));
+    for (const a of (x.axes || [])) axes.push(a);
+    for (const b of (x.buttons || [])) buttons.push(b);
   }
-  return best;
+  return { id: ids.join(' + '), mapping: live.some(x => x.mapping === 'standard') ? 'standard' : '', axes, buttons, _merged: live.length };
 }
 
 function setupGamepad() {
@@ -2315,7 +2322,7 @@ function updateAxesPage() {
   const di = document.getElementById('axes-devinfo');
   if (di) {
     const std = g.mapping === 'standard';
-    di.innerHTML = `dev: ${g.id.replace(/[<>]/g, '')}<br>mapping: <b style="color:${std ? '#ff9d3d' : '#39ff6a'}">${g.mapping || 'raw'}</b> · ${ax.length} axes · ${bt.length} buttons`
+    di.innerHTML = `dev: ${g.id.replace(/[<>]/g, '')}${g._merged ? ` <b style="color:#39ff6a">(${g._merged} devices merged)</b>` : ''}<br>mapping: <b style="color:${std ? '#ff9d3d' : '#39ff6a'}">${g.mapping || 'raw'}</b> · ${ax.length} axes · ${bt.length} buttons`
       + (std ? `<br><span style="color:#ff9d3d">⚠ Chrome forced "standard" mode — it collapses the radio to 4 axes and can hide a gimbal. Try Firefox, or in EdgeTX SYS→Hardware set the gimbals so all 4 land on axes.</span>` : '');
   }
   tickDetect(ax, bt);
