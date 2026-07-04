@@ -731,7 +731,8 @@ const config = {
   expoRP: 0.40, expoYaw: 0.50,
   camAngle: 30, camFov: 115,
   stickSize: 1.0, stickOpacity: 1.0, stickDeadzone: 0.08,
-  rateSmooth: 0.13, // seconds — low-pass on commanded rates (less twitchy)
+  rateSmooth: 0.13,   // seconds — low-pass on commanded rates for the touch sticks
+  remoteSmooth: 0.10, // seconds — lighter low-pass for the physical controller
   propwash: 0.05,   // 0..1 — turbulence when descending through your own prop wake
   inputMode: 'touch', // 'touch' = on-screen sticks; 'remote' = gamepad / USB radio
 };
@@ -2218,8 +2219,9 @@ function updatePhysics(dt) {
     const yawRate   = rateResponse(yawStick,   config.centerYaw, maxYaw,   expoYaw) * Math.PI / 180;
 
     // Low-pass the commanded rates so the response ramps in (less twitchy).
-    // Controller mode uses k=1 (no smoothing) for an instant, direct 1:1 feel.
-    const k = filtering ? (1 - Math.exp(-dt / config.rateSmooth)) : 1;
+    // Touch uses rateSmooth; the controller gets a lighter remoteSmooth (0.1s).
+    const smoothTau = filtering ? config.rateSmooth : config.remoteSmooth;
+    const k = 1 - Math.exp(-dt / smoothTau);
     easedRoll  += (rollRate  - easedRoll)  * k;
     easedPitch += (pitchRate - easedPitch) * k;
     easedYaw   += (yawRate   - easedYaw)   * k;
