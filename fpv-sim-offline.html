@@ -3332,6 +3332,16 @@ function updateArmUI() {
   }
 }
 
+// Shortest distance from point P to segment A→B (all in world coords).
+function segPointDistance(px, py, pz, a, b) {
+  const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+  const apx = px - a[0], apy = py - a[1], apz = pz - a[2];
+  const len2 = abx * abx + aby * aby + abz * abz;
+  let t = len2 > 1e-9 ? (apx * abx + apy * aby + apz * abz) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (a[0] + abx * t), py - (a[1] + aby * t), pz - (a[2] + abz * t));
+}
+
 // Format seconds as M:SS.d (tenths) for lap times.
 function formatLap(t) {
   if (t == null) return '--:--';
@@ -3472,6 +3482,10 @@ function updatePhysics(dt) {
   v[1] += accelY * dt;
   v[2] += accelZ * dt;
 
+  // Remember where we were so gate passing can use the whole travel segment
+  // this frame (prevents fast passes from tunnelling straight through a gate).
+  const prevPos = [craft.pos[0], craft.pos[1], craft.pos[2]];
+
   craft.pos[0] += v[0] * dt;
   craft.pos[1] += v[1] * dt;
   craft.pos[2] += v[2] * dt;
@@ -3521,10 +3535,12 @@ function updatePhysics(dt) {
     }
   }
 
-  // Checkpoints must be flown IN ORDER — only the next gate is live.
+  // Checkpoints must be flown IN ORDER — only the next gate is live. Use the
+  // distance from the gate centre to the whole travel segment this frame so
+  // even a very fast pass registers.
   const ng = world.gates[state.nextGate];
   if (ng) {
-    const d = Math.hypot(craft.pos[0] - ng.x, craft.pos[1] - ng.y, craft.pos[2] - ng.z);
+    const d = segPointDistance(ng.x, ng.y, ng.z, prevPos, craft.pos);
     if (d < ng.r) {
       ng.passed = true;
       state.nextGate++;
