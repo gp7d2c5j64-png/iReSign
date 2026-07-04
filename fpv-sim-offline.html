@@ -2499,47 +2499,66 @@ const phys = {
 /* =========================================================
    NEIGHBORHOOD WORLD (real 3D objects, perspective-projected)
    ========================================================= */
-const world = { houses: [], palms: [], jungle: [], bushes: [], driveways: [], walls: [], gates: [] };
+const world = { houses: [], palms: [], jungle: [], bushes: [], rocks: [], logs: [], driveways: [], walls: [], gates: [] };
 
 // Map boundary: flying past this radius from spawn triggers the "leaving map" warning.
-const MAP_BOUNDS = { radius: 95, warnMargin: 12 };
+const MAP_BOUNDS = { radius: 175, warnMargin: 15 };
 
 function buildNeighborhood() {
-  const houseSpecs = [
-    // [x, z, footprint w, footprint d, height, roofColor variant, wallColor variant]
-    [-16, -4,  9, 11, 6.4, 0, 0],
-    [-15, 16,  10, 10, 7.0, 1, 1],
-    [-17, 34,  8, 9,  6.0, 0, 2],
-    [-14, 52,  9, 10, 6.8, 1, 0],
-    [-16, 70,  9, 10, 6.5, 0, 1],
-    [ 16, -8,  9, 10, 6.6, 1, 2],
-    [ 17, 10,  10, 11, 7.2, 0, 1],
-    [ 15, 30,  8, 9,  6.2, 1, 0],
-    [ 16, 48,  9, 10, 6.9, 0, 2],
-    [ 15, 66,  9, 10, 6.7, 1, 1],
+  // A wide palette so the street reads as a real, varied neighbourhood.
+  const wallColors = [
+    '#d8c9a8', '#e3dcc8', '#c9b89a', // warm neutrals
+    '#c6d3d8', '#aebfc9', // cool blue-greys
+    '#c4d0b4', '#b3c6a4', // sage greens
+    '#e0c8b4', '#d9b9a6', // terracotta / peach
+    '#cdc2d0', '#e6ddd0', // lavender-grey / cream
+    '#b8a98f', '#e8d9b0', // taupe / sand
   ];
-  const roofColors = ['#a8462f', '#8a3d2c', '#b8562f'];
-  const wallColors = ['#d8c9a8', '#e3dcc8', '#c9b89a'];
-  houseSpecs.forEach(([x, z, w, d, h, roofV, wallV]) => {
-    world.houses.push({
-      x, z, w, d, h,
-      roofColor: roofColors[roofV],
-      wallColor: wallColors[wallV],
-    });
-  });
+  const roofColors = [
+    '#a8462f', '#8a3d2c', '#b8562f', '#8a4a24', // terracotta / clay
+    '#465664', '#3f5560', '#4a5a6a', // slate blue-greys
+    '#54613f', '#5a6b4a', // olive greens
+    '#6a4a3a', '#7a4a52', // brown / maroon
+    '#3b4652', // charcoal
+  ];
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+
+  // Two rows of houses per side lining a long street. The front row faces the
+  // road; the back row is offset behind it for depth. Random footprints,
+  // heights and colours so no two houses look alike.
+  for (let side = -1; side <= 1; side += 2) {
+    // Front row
+    let z = -8;
+    for (let row = 0; row < 12; row++) {
+      world.houses.push({
+        x: side * (15 + Math.random() * 3), z,
+        w: 8 + Math.random() * 3.5, d: 9 + Math.random() * 3, h: 6 + Math.random() * 1.8,
+        wallColor: pick(wallColors), roofColor: pick(roofColors), chimney: Math.random() < 0.6,
+      });
+      z += 15 + Math.random() * 6;
+    }
+    // Back row (larger lots, set back), staggered between the front houses
+    z = 2;
+    for (let row = 0; row < 8; row++) {
+      world.houses.push({
+        x: side * (30 + Math.random() * 4), z,
+        w: 9 + Math.random() * 4, d: 10 + Math.random() * 3, h: 6.5 + Math.random() * 2.2,
+        wallColor: pick(wallColors), roofColor: pick(roofColors), chimney: Math.random() < 0.6,
+      });
+      z += 20 + Math.random() * 8;
+    }
+  }
 
   // Palm trees: one per house, planted 5 m out from the street-facing wall
   // (keeps them clear of the houses and out of the takeoff sightline), plus a
   // few decorative ones in the open/pool areas.
-  world.houses.forEach(h => {
+  // Front-row houses (|x| < 22) get a palm planted 5 m out toward the street.
+  world.houses.filter(h => Math.abs(h.x) < 22).forEach(h => {
     const side = h.x < 0 ? 1 : -1; // toward the street (x = 0)
     world.palms.push({
       x: h.x + side * (h.w / 2 + 5), z: h.z,
       h: 7 + Math.random() * 2.5, lean: (Math.random() - 0.5) * 0.15,
     });
-  });
-  [[24, -4], [26, 40], [-24, 24]].forEach(([x, z]) => {
-    world.palms.push({ x, z, h: 7 + Math.random() * 2.5, lean: (Math.random() - 0.5) * 0.15 });
   });
 
   // Jungle: dense broadleaf trees filling the sides and the deep background,
@@ -2547,47 +2566,69 @@ function buildNeighborhood() {
   // (|x| < 11) and the house footprints so the gate line stays flyable.
   const nearHouse = (x, z) => world.houses.some(h =>
     Math.abs(x - h.x) < h.w / 2 + 2.5 && Math.abs(z - h.z) < h.d / 2 + 2.5);
+  const zMin = -44, zSpan = 250; // jungle wraps the whole extended street
   let guard = 0;
-  while (world.jungle.length < 46 && guard++ < 4000) {
+  while (world.jungle.length < 130 && guard++ < 12000) {
     const side = Math.random() < 0.5 ? -1 : 1;
-    // Two bands: a mid band beside the houses, and a dense far wall of trees.
+    // Bands: between the two house rows, and a dense far wall beyond them.
     const band = Math.random();
-    const x = side * (band < 0.55 ? 20 + Math.random() * 16 : 40 + Math.random() * 26);
-    const z = -34 + Math.random() * 140;
+    const x = side * (band < 0.35 ? 21 + Math.random() * 7 : band < 0.7 ? 40 + Math.random() * 20 : 62 + Math.random() * 34);
+    const z = zMin + Math.random() * zSpan;
     if (Math.abs(x) < 11 || nearHouse(x, z)) continue;
     world.jungle.push({
       x, z,
-      h: 6.5 + Math.random() * 7.5,
+      h: 6.5 + Math.random() * 8,
       lean: (Math.random() - 0.5) * 0.12,
-      spread: 2.4 + Math.random() * 1.8,
+      spread: 2.4 + Math.random() * 2.0,
       tint: Math.random(),
       rot: Math.random() * Math.PI * 2,
     });
   }
-  // A few emergent giants poking above the canopy, further out.
-  [[-52, 18], [56, 40], [-58, 70], [60, 4], [-46, 100]].forEach(([x, z]) => {
-    world.jungle.push({ x, z, h: 15 + Math.random() * 4, lean: 0, spread: 3.6, tint: Math.random(), rot: Math.random() * 6.28 });
-  });
+  // Emergent giants poking above the canopy, scattered along the deep tree wall.
+  for (let i = 0; i < 14; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    world.jungle.push({
+      x: side * (58 + Math.random() * 38), z: zMin + Math.random() * zSpan,
+      h: 15 + Math.random() * 6, lean: (Math.random() - 0.5) * 0.05,
+      spread: 3.6 + Math.random() * 1.4, tint: Math.random(), rot: Math.random() * 6.28,
+    });
+  }
 
   // Low undergrowth: ferns and leafy bushes scattered across the floor,
   // including right up to the corridor edge for that overgrown feel.
   guard = 0;
-  while (world.bushes.length < 90 && guard++ < 6000) {
-    const x = (Math.random() - 0.5) * 96;
-    const z = -30 + Math.random() * 138;
+  while (world.bushes.length < 160 && guard++ < 14000) {
+    const x = (Math.random() - 0.5) * 180;
+    const z = zMin + Math.random() * zSpan;
     if (Math.abs(x) < 5.5 || nearHouse(x, z)) continue; // keep the road/takeoff clear
     world.bushes.push({
       x, z,
-      r: 0.7 + Math.random() * 1.3,
+      r: 0.7 + Math.random() * 1.4,
       tint: Math.random(),
-      fern: Math.random() < 0.4,
+      fern: Math.random() < 0.42,
       rot: Math.random() * Math.PI * 2,
     });
   }
 
-  houseSpecs.forEach(([x, z, w, d]) => {
-    const side = x < 0 ? 1 : -1;
-    world.driveways.push({ x: x + side * (w / 2 + 1.5), z, w: 3, l: d * 0.8 });
+  // Rocks and fallen logs on the jungle floor for ground detail.
+  guard = 0;
+  while (world.rocks.length < 34 && guard++ < 5000) {
+    const x = (Math.random() - 0.5) * 170, z = zMin + Math.random() * zSpan;
+    if (Math.abs(x) < 6 || nearHouse(x, z)) continue;
+    world.rocks.push({ x, z, r: 0.4 + Math.random() * 1.1, rot: Math.random() * 6.28, tint: Math.random() });
+  }
+  guard = 0;
+  while (world.logs.length < 12 && guard++ < 4000) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const x = side * (14 + Math.random() * 60), z = zMin + Math.random() * zSpan;
+    if (nearHouse(x, z)) continue;
+    world.logs.push({ x, z, len: 3 + Math.random() * 3, r: 0.28 + Math.random() * 0.18, rot: Math.random() * 6.28 });
+  }
+
+  // Driveways link the front-row houses to the street.
+  world.houses.filter(h => Math.abs(h.x) < 22).forEach(h => {
+    const side = h.x < 0 ? 1 : -1;
+    world.driveways.push({ x: h.x + side * (h.w / 2 + 1.5), z: h.z, w: 3, l: h.d * 0.8 });
   });
 
   [[-16, -9], [-15, 11], [16, -13], [17, 5]].forEach(([x, z]) => {
@@ -2851,6 +2892,15 @@ function buildScene() {
     const door = new THREE.Mesh(new THREE.BoxGeometry(1.5, wallH * 0.4, 0.1), doorMat);
     door.position.set(0, wallH * 0.2, zface); g.add(door);
 
+    // Optional brick chimney rising off the roof.
+    if (h.chimney) {
+      const ch = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, roofH * 1.1, 0.9),
+        new THREE.MeshStandardMaterial({ color: 0x8a5b46, map: brickTex, roughness: 0.95, metalness: 0.0 }));
+      ch.position.set(h.w * 0.22, wallH + roofH * 0.75, h.d * 0.18);
+      ch.castShadow = true; g.add(ch);
+    }
+
     g.position.set(h.x, 0, MZ(h.z));
     scene.add(g);
   });
@@ -2925,29 +2975,59 @@ function buildScene() {
   // Jungle: broadleaf trees with a tapered trunk and a crown built from a few
   // overlapping leaf blobs (varied greens), plus low bushes and ferns for
   // undergrowth. Geometries/materials are shared for performance.
-  const jTrunkMat = new THREE.MeshStandardMaterial({ color: 0x6b5236, roughness: 0.95, metalness: 0.0 });
-  const leafMats = [0x2f6b2e, 0x3b8036, 0x275a26, 0x4c9a3f, 0x356e2a].map(c =>
-    new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.0, flatShading: true }));
+  const jTrunkMat = new THREE.MeshStandardMaterial({ color: 0x6b5236, roughness: 0.97, metalness: 0.0 });
+  const jTrunkMat2 = new THREE.MeshStandardMaterial({ color: 0x5a4630, roughness: 0.97, metalness: 0.0 });
+  // Three green ramps: darker "shadow" leaves (crown underside/interior),
+  // mid greens, and brighter "sun" leaves for the top. Layering these reads as
+  // real dappled foliage rather than one flat blob.
+  const leafDark = [0x24501f, 0x2b5c26, 0x1f4a1e].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, flatShading: true }));
+  const leafMid  = [0x2f6b2e, 0x357029, 0x3b8036, 0x356e2a].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, flatShading: true }));
+  const leafSun  = [0x57a840, 0x62b84a, 0x6cc255].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.8, flatShading: true }));
+  const leafMats = [...leafDark, ...leafMid, ...leafSun]; // for bushes/ferns below
   const blobGeo = new THREE.IcosahedronGeometry(1, 1); // reused, scaled per blob
-  const trunkGeo = new THREE.CylinderGeometry(0.18, 0.5, 1, 8); // unit height, scaled
+  const trunkGeo = new THREE.CylinderGeometry(0.16, 0.42, 1, 9); // unit height, scaled
+  const branchGeo = new THREE.CylinderGeometry(0.05, 0.14, 1, 6);
+  const pickM = a => a[Math.floor(Math.random() * a.length)];
 
   world.jungle.forEach(t => {
     const g = new THREE.Group();
-    // Trunk (unit cylinder scaled to height), leaning slightly.
-    const trunk = new THREE.Mesh(trunkGeo, jTrunkMat);
-    trunk.scale.set(1, t.h, 1); trunk.position.y = t.h / 2;
-    trunk.rotation.z = t.lean; trunk.castShadow = true;
+    const rTrunk = 0.5 + t.spread * 0.12; // thicker trunk on bigger trees
+    // Trunk (unit cylinder scaled to height + girth), leaning slightly.
+    const trunk = new THREE.Mesh(trunkGeo, Math.random() < 0.5 ? jTrunkMat : jTrunkMat2);
+    trunk.scale.set(rTrunk, t.h, rTrunk); trunk.position.y = t.h / 2;
+    trunk.rotation.z = t.lean; trunk.castShadow = true; trunk.receiveShadow = true;
     g.add(trunk);
     const topX = Math.sin(t.lean) * t.h, topY = t.h;
-    // Canopy: a cluster of leaf blobs forming a broad, rounded crown.
-    const nBlobs = 5 + Math.floor(Math.random() * 4);
-    const baseMat = leafMats[Math.floor(t.tint * leafMats.length) % leafMats.length];
+
+    // A couple of bare branch stubs angling up into the crown.
+    const nBr = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < nBr; i++) {
+      const br = new THREE.Mesh(branchGeo, jTrunkMat);
+      const bl = t.spread * (0.7 + Math.random() * 0.5);
+      const yaw = Math.random() * Math.PI * 2, tilt = 0.5 + Math.random() * 0.4;
+      br.scale.set(1, bl, 1);
+      br.position.set(topX, topY - t.spread * (0.5 + Math.random() * 0.4), 0);
+      br.rotation.set(Math.cos(yaw) * tilt, 0, Math.sin(yaw) * tilt);
+      br.castShadow = true; g.add(br);
+    }
+
+    // Canopy: layered leaf blobs — a broad dark base, mid-green body, and a few
+    // bright sun-lit clumps on top — forming a full, dappled rounded crown.
+    const bigMat = pickM(leafDark);
+    const base = new THREE.Mesh(blobGeo, bigMat);
+    base.position.set(topX, topY, 0); base.scale.set(t.spread, t.spread * 0.8, t.spread);
+    base.castShadow = true; g.add(base);
+    const nBlobs = 8 + Math.floor(Math.random() * 5);
     for (let i = 0; i < nBlobs; i++) {
-      const mat = i === 0 ? baseMat : leafMats[Math.floor(Math.random() * leafMats.length)];
+      const top = i > nBlobs * 0.6;
+      const mat = top ? pickM(leafSun) : pickM(leafMid);
       const blob = new THREE.Mesh(blobGeo, mat);
-      const ang = Math.random() * Math.PI * 2, rad = i === 0 ? 0 : Math.random() * t.spread * 0.7;
-      const s = (i === 0 ? t.spread : t.spread * (0.5 + Math.random() * 0.4));
-      blob.position.set(topX + Math.cos(ang) * rad, topY + (Math.random() - 0.3) * t.spread * 0.5, Math.sin(ang) * rad);
+      const ang = Math.random() * Math.PI * 2, rad = Math.random() * t.spread * 0.75;
+      const s = t.spread * (0.42 + Math.random() * 0.4);
+      blob.position.set(
+        topX + Math.cos(ang) * rad,
+        topY + (top ? t.spread * (0.25 + Math.random() * 0.35) : (Math.random() - 0.35) * t.spread * 0.5),
+        Math.sin(ang) * rad);
       blob.scale.set(s, s * 0.82, s);
       blob.castShadow = true;
       g.add(blob);
@@ -2955,6 +3035,30 @@ function buildScene() {
     g.rotation.y = t.rot;
     g.position.set(t.x, 0, MZ(t.z));
     scene.add(g);
+  });
+
+  // Rocks (faceted boulders) and mossy fallen logs on the jungle floor.
+  const rockMats = [0x7c7a74, 0x6b6a64, 0x8a877e, 0x625f58].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1.0, flatShading: true }));
+  const rockGeo = new THREE.IcosahedronGeometry(1, 0);
+  world.rocks.forEach(r => {
+    const m = new THREE.Mesh(rockGeo, rockMats[Math.floor(r.tint * rockMats.length) % rockMats.length]);
+    m.position.set(r.x, r.r * 0.45, MZ(r.z));
+    m.scale.set(r.r, r.r * (0.6 + Math.random() * 0.3), r.r);
+    m.rotation.set(Math.random(), r.rot, Math.random());
+    m.castShadow = true; m.receiveShadow = true; scene.add(m);
+  });
+  const logMat = new THREE.MeshStandardMaterial({ color: 0x4f3d29, roughness: 0.98, metalness: 0.0 });
+  const mossMat = new THREE.MeshStandardMaterial({ color: 0x3f6b34, roughness: 0.95, metalness: 0.0 });
+  const logGeo = new THREE.CylinderGeometry(1, 1, 1, 8);
+  world.logs.forEach(l => {
+    const log = new THREE.Mesh(logGeo, logMat);
+    log.scale.set(l.r, l.len, l.r); log.rotation.set(0, 0, Math.PI / 2); log.rotation.y = l.rot;
+    log.position.set(l.x, l.r, MZ(l.z)); log.castShadow = true; log.receiveShadow = true;
+    scene.add(log);
+    // a patch of moss along the top
+    const moss = new THREE.Mesh(logGeo, mossMat);
+    moss.scale.set(l.r * 1.02, l.len * 0.7, l.r * 0.5); moss.rotation.copy(log.rotation);
+    moss.position.set(l.x, l.r + l.r * 0.5, MZ(l.z)); scene.add(moss);
   });
 
   // Undergrowth: bushes (blob clusters) and ferns (radiating blades).
@@ -2971,7 +3075,6 @@ function buildScene() {
         blade.scale.setScalar(b.r * (0.6 + Math.random() * 0.5));
         blade.rotation.y = (i / nB) * Math.PI * 2;
         blade.rotation.z = -0.15 - Math.random() * 0.25;
-        blade.castShadow = true;
         g.add(blade);
       }
     } else {
@@ -2982,7 +3085,7 @@ function buildScene() {
         const s = b.r * (0.6 + Math.random() * 0.6);
         blob.position.set((Math.random() - 0.5) * b.r, s * 0.55, (Math.random() - 0.5) * b.r);
         blob.scale.set(s, s * 0.8, s);
-        blob.castShadow = true; blob.receiveShadow = true;
+        blob.receiveShadow = true;
         g.add(blob);
       }
     }
