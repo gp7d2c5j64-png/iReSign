@@ -581,6 +581,12 @@ button.secondary {
           <div id="gp-channels" style="font-size:11px; color:#39ff6a; font-family:'Share Tech Mono',monospace; margin-top:4px;"></div>
           <button class="secondary" style="width:100%; margin:8px 0 0;" onclick="startCalibration()">Calibrate Sticks (guided)</button>
           <button class="secondary" style="width:100%; margin:6px 0 0;" onclick="openAxesPage()">Axis Monitor / Manual Map</button>
+          <div class="setting-row" style="margin-top:10px;">
+            <label>Input Filtering</label>
+            <input type="range" id="remote-smooth" min="0" max="200" value="50">
+            <span class="setting-val" id="val-remote-smooth">50 ms</span>
+          </div>
+          <p class="info-text" style="margin:4px 0 0;">Smoothing on the controller sticks. 0 ms = raw/instant; higher = softer, less twitchy.</p>
         </div>
         <p class="info-text" style="margin:10px 0 0;">Touch uses the on-screen sticks. Remote flies with a gamepad / USB radio. <strong>RC radios (RadioMaster etc.) must be calibrated</strong> so the channels map correctly.</p>
       </div>
@@ -3200,6 +3206,7 @@ function setupMenu() {
     document.getElementById('zone-right').style.opacity = config.stickOpacity;
   }, v => v + '%', 'val-stick-opacity');
   bindRange('stick-deadzone', v => { config.stickDeadzone = v / 100; }, v => v + '%', 'val-stick-deadzone');
+  bindRange('remote-smooth', v => { config.remoteSmooth = v / 1000; }, v => v + ' ms', 'val-remote-smooth');
 }
 
 function bindRange(id, apply, format, valId) {
