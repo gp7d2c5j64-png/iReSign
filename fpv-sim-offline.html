@@ -3548,12 +3548,19 @@ function updatePhysics(dt) {
 
   // Obstacle collisions — houses and trees are solid; hitting one crashes.
   // (Physics uses world coords; rendering's Z-flip doesn't apply here.)
-  const cx = craft.pos[0], cy = craft.pos[1], cz = craft.pos[2], CR = 0.3;
+  // CR is a small skin so you crash right at the surface, not metres away.
+  const cx = craft.pos[0], cy = craft.pos[1], cz = craft.pos[2], CR = 0.15;
   for (const h of world.houses) {
-    if (cy < h.h + CR &&
-        cx > h.x - h.w / 2 - CR && cx < h.x + h.w / 2 + CR &&
-        cz > h.z - h.d / 2 - CR && cz < h.z + h.d / 2 + CR) {
-      triggerCrash('Hit a house!'); return;
+    const inFoot = cx > h.x - h.w / 2 - CR && cx < h.x + h.w / 2 + CR &&
+                   cz > h.z - h.d / 2 - CR && cz < h.z + h.d / 2 + CR;
+    if (!inFoot) continue;
+    const wallH = h.h * 0.72;
+    if (cy < wallH + CR) { triggerCrash('Hit a house!'); return; } // solid walls
+    // Roof: a cone that narrows to a point, so only crash within its real slope
+    // (not in the open air above the eaves).
+    if (cy < h.h) {
+      const coneR = Math.hypot(h.w, h.d) * 0.42 * ((h.h - cy) / (h.h - wallH)) + CR;
+      if (Math.hypot(cx - h.x, cz - h.z) < coneR) { triggerCrash('Hit a house!'); return; }
     }
   }
   for (const p of world.palms) {
