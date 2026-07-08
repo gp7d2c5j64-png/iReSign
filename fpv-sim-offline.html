@@ -2540,23 +2540,25 @@ function buildNeighborhood() {
   // road; the back row is offset behind it for depth. Random footprints,
   // heights and colours so no two houses look alike.
   for (let side = -1; side <= 1; side += 2) {
-    // Front row
+    // Front row — enterable, furnished interiors (you fly to these).
     let z = -8;
     for (let row = 0; row < 12; row++) {
       world.houses.push({
         x: side * (15 + Math.random() * 3), z,
         w: 8 + Math.random() * 3.5, d: 9 + Math.random() * 3, h: 6 + Math.random() * 1.8,
         wallColor: pick(wallColors), roofColor: pick(roofColors), chimney: Math.random() < 0.6,
+        hollow: true, sideSign: side < 0 ? 1 : -1, // door faces the street (x=0)
       });
       z += 15 + Math.random() * 6;
     }
-    // Back row (larger lots, set back), staggered between the front houses
+    // Back row (larger lots, set back) — solid background boxes.
     z = 2;
     for (let row = 0; row < 8; row++) {
       world.houses.push({
         x: side * (30 + Math.random() * 4), z,
         w: 9 + Math.random() * 4, d: 10 + Math.random() * 3, h: 6.5 + Math.random() * 2.2,
         wallColor: pick(wallColors), roofColor: pick(roofColors), chimney: Math.random() < 0.6,
+        hollow: false,
       });
       z += 20 + Math.random() * 8;
     }
@@ -2916,43 +2918,117 @@ function buildScene() {
     scene.add(patch);
   });
 
-  // Houses: walls box + hip roof (4-sided cone), plus door/windows
+  // Houses. Front-row houses are HOLLOW and furnished — built from thin wall
+  // panels with a doorway gap you can fly through — with world-space colliders
+  // stored on h.boxes. Back-row houses stay simple solid boxes.
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
+  const winMat = new THREE.MeshStandardMaterial({ color: 0x2f4a5e, emissive: 0x16242e, emissiveIntensity: 0.5, roughness: 0.25, metalness: 0.6 });
+  const doorMat = new THREE.MeshStandardMaterial({ color: 0x5a3d2c, roughness: 0.8, metalness: 0.0 });
+  const floorMats = [0x8a6f4e, 0x9a7a52, 0x6f5a3f, 0x74655a].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  const rugMats = [0x8a3d4a, 0x3d5a8a, 0x4a7a4a, 0x8a6a3d, 0x6a3d7a].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.95 }));
+  const fabricMats = [0x6a7a8a, 0x8a6a5a, 0x5a7a6a, 0x7a5a6a, 0x8a8a6a].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 }));
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x5a4030, roughness: 0.8 });
+  const ceilMat = new THREE.MeshStandardMaterial({ color: 0xece4d6, roughness: 1.0 });
+  const rnd = a => a[Math.floor(Math.random() * a.length)];
+
   world.houses.forEach(h => {
     const g = new THREE.Group();
     const wallH = h.h * 0.72;
-    const walls = new THREE.Mesh(
-      new THREE.BoxGeometry(h.w, wallH, h.d),
-      new THREE.MeshStandardMaterial({ color: new THREE.Color(h.wallColor), map: brickTex, roughness: 0.92, metalness: 0.0 }));
-    walls.position.y = wallH / 2; walls.castShadow = true; walls.receiveShadow = true;
-    g.add(walls);
-
     const roofH = Math.max(1.4, h.h - wallH);
+    const wallMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(h.wallColor), map: brickTex, roughness: 0.92, metalness: 0.0 });
+
     const roof = new THREE.Mesh(
       new THREE.ConeGeometry(Math.hypot(h.w, h.d) * 0.42, roofH, 4),
       new THREE.MeshStandardMaterial({ color: new THREE.Color(h.roofColor), map: roofTex, roughness: 0.7, metalness: 0.0 }));
     roof.position.y = wallH + roofH / 2; roof.rotation.y = Math.PI / 4; roof.castShadow = true;
     g.add(roof);
 
-    // Front face (toward the street = lower z) gets a door + two windows.
-    const front = h.z < 0 ? h.d / 2 : -h.d / 2; // local, mapped below via group
-    const winMat = new THREE.MeshStandardMaterial({ color: 0x2f4a5e, emissive: 0x16242e, emissiveIntensity: 0.5, roughness: 0.25, metalness: 0.6 });
-    const doorMat = new THREE.MeshStandardMaterial({ color: 0x5a3d2c, roughness: 0.8, metalness: 0.0 });
-    const zface = -h.d / 2 - 0.02; // street-facing side after Z-map
-    [[-h.w * 0.26, wallH * 0.58], [h.w * 0.26, wallH * 0.58]].forEach(([wx, wy]) => {
-      const win = new THREE.Mesh(new THREE.BoxGeometry(h.w * 0.22, wallH * 0.26, 0.1), winMat);
-      win.position.set(wx, wy, zface); g.add(win);
-    });
-    const door = new THREE.Mesh(new THREE.BoxGeometry(1.5, wallH * 0.4, 0.1), doorMat);
-    door.position.set(0, wallH * 0.2, zface); g.add(door);
-
-    // Optional brick chimney rising off the roof.
     if (h.chimney) {
-      const ch = new THREE.Mesh(
-        new THREE.BoxGeometry(0.9, roofH * 1.1, 0.9),
-        new THREE.MeshStandardMaterial({ color: 0x8a5b46, map: brickTex, roughness: 0.95, metalness: 0.0 }));
-      ch.position.set(h.w * 0.22, wallH + roofH * 0.75, h.d * 0.18);
-      ch.castShadow = true; g.add(ch);
+      const ch = new THREE.Mesh(unitBox, new THREE.MeshStandardMaterial({ color: 0x8a5b46, map: brickTex, roughness: 0.95 }));
+      ch.scale.set(0.9, roofH * 1.1, 0.9);
+      ch.position.set(h.w * 0.22, wallH + roofH * 0.75, h.d * 0.18); ch.castShadow = true; g.add(ch);
     }
+
+    if (!h.hollow) {
+      // Simple solid box (background house).
+      const walls = new THREE.Mesh(unitBox, wallMat);
+      walls.scale.set(h.w, wallH, h.d); walls.position.y = wallH / 2;
+      walls.castShadow = true; walls.receiveShadow = true; g.add(walls);
+      const zface = -h.d / 2 - 0.02;
+      [[-h.w * 0.26, wallH * 0.58], [h.w * 0.26, wallH * 0.58]].forEach(([wx, wy]) => {
+        const win = new THREE.Mesh(unitBox, winMat);
+        win.scale.set(h.w * 0.22, wallH * 0.26, 0.1); win.position.set(wx, wy, zface); g.add(win);
+      });
+      const door = new THREE.Mesh(unitBox, doorMat);
+      door.scale.set(1.5, wallH * 0.4, 0.1); door.position.set(0, wallH * 0.2, zface); g.add(door);
+      g.position.set(h.x, 0, MZ(h.z)); scene.add(g);
+      return;
+    }
+
+    // ---- HOLLOW, FURNISHED HOUSE ----
+    const th = 0.22, halfW = h.w / 2, halfD = h.d / 2;
+    const s = h.sideSign;                 // +1 or -1: local/world x direction toward the street
+    const doorW = 1.9, doorH = Math.min(wallH - 0.4, wallH * 0.62);
+    h.boxes = [];
+    // Panel helper: builds a mesh in the group AND a world-space collider box.
+    // (local three-z maps to world z symmetrically about h.z, so z stays direct.)
+    const panel = (lx, lz, sx, sz, hgt, yBase) => {
+      const m = new THREE.Mesh(unitBox, wallMat);
+      m.scale.set(sx, hgt, sz); m.position.set(lx, yBase + hgt / 2, lz);
+      m.castShadow = true; m.receiveShadow = true; g.add(m);
+      h.boxes.push({ x0: h.x + lx - sx / 2, x1: h.x + lx + sx / 2, y0: yBase, y1: yBase + hgt,
+                     z0: h.z + lz - sz / 2, z1: h.z + lz + sz / 2 });
+    };
+    // Far x-wall, both z-walls (full height).
+    panel(-s * halfW, 0, th, h.d, wallH, 0);
+    panel(0,  halfD, h.w, th, wallH, 0);
+    panel(0, -halfD, h.w, th, wallH, 0);
+    // Street-facing x-wall: two segments leaving a door gap, plus a lintel.
+    const segLen = (h.d - doorW) / 2;
+    panel(s * halfW,  (doorW / 2 + segLen / 2), th, segLen, wallH, 0);
+    panel(s * halfW, -(doorW / 2 + segLen / 2), th, segLen, wallH, 0);
+    panel(s * halfW, 0, th, doorW, wallH - doorH, doorH); // lintel above the door
+
+    // Floor + flat ceiling (so you don't see up into the roof void).
+    const floor = new THREE.Mesh(unitBox, rnd(floorMats));
+    floor.scale.set(h.w - th, 0.24, h.d - th); floor.position.y = 0.12; floor.receiveShadow = true; g.add(floor);
+    const ceil = new THREE.Mesh(unitBox, ceilMat);
+    ceil.scale.set(h.w - th, 0.1, h.d - th); ceil.position.y = wallH - 0.05; g.add(ceil);
+
+    // Windows on the side walls (emissive glass).
+    [halfD, -halfD].forEach(lz => {
+      const win = new THREE.Mesh(unitBox, winMat);
+      win.scale.set(h.w * 0.3, wallH * 0.3, 0.08); win.position.set(0, wallH * 0.55, lz); g.add(win);
+    });
+
+    // ---- Furniture (decorative, non-colliding so you can weave through) ----
+    const inW = halfW - 0.7, inD = halfD - 0.7;
+    // Rug
+    const rug = new THREE.Mesh(unitBox, rnd(rugMats));
+    rug.scale.set(h.w * 0.42, 0.04, h.d * 0.38); rug.position.set(0, 0.12, 0); g.add(rug);
+    // Bed against the far wall
+    const bed = new THREE.Mesh(unitBox, rnd(fabricMats));
+    bed.scale.set(1.4, 0.5, 2.0); bed.position.set(-s * (inW - 0.7), 0.35, inD - 1.0);
+    bed.castShadow = true; g.add(bed);
+    const pillow = new THREE.Mesh(unitBox, ceilMat);
+    pillow.scale.set(1.2, 0.18, 0.5); pillow.position.set(-s * (inW - 0.7), 0.65, inD - 1.9); g.add(pillow);
+    // Sofa on the near side
+    const sofa = new THREE.Mesh(unitBox, rnd(fabricMats));
+    sofa.scale.set(1.9, 0.5, 0.8); sofa.position.set(s * (inW - 0.6), 0.35, -inD + 1.0);
+    sofa.castShadow = true; g.add(sofa);
+    const sofaBack = new THREE.Mesh(unitBox, sofa.material);
+    sofaBack.scale.set(1.9, 0.6, 0.25); sofaBack.position.set(s * (inW - 0.25), 0.55, -inD + 1.0); g.add(sofaBack);
+    // Table + top
+    const table = new THREE.Mesh(unitBox, woodMat);
+    table.scale.set(1.3, 0.12, 0.9); table.position.set(0, 0.75, 0); table.castShadow = true; g.add(table);
+    [[-0.55, -0.35], [0.55, -0.35], [-0.55, 0.35], [0.55, 0.35]].forEach(([lx, lz]) => {
+      const leg = new THREE.Mesh(unitBox, woodMat);
+      leg.scale.set(0.12, 0.75, 0.12); leg.position.set(lx, 0.37, lz); g.add(leg);
+    });
+    // Tall shelf against a side wall
+    const shelf = new THREE.Mesh(unitBox, woodMat);
+    shelf.scale.set(1.2, wallH * 0.7, 0.35); shelf.position.set(-s * (inW - 0.3), wallH * 0.35, -inD + 0.6);
+    shelf.castShadow = true; g.add(shelf);
 
     g.position.set(h.x, 0, MZ(h.z));
     scene.add(g);
@@ -3555,10 +3631,18 @@ function updatePhysics(dt) {
                    cz > h.z - h.d / 2 - CR && cz < h.z + h.d / 2 + CR;
     if (!inFoot) continue;
     const wallH = h.h * 0.72;
-    if (cy < wallH + CR) { triggerCrash('Hit a house!'); return; } // solid walls
+    if (h.boxes) {
+      // Hollow house: crash only on the actual wall panels (doorway is a gap).
+      for (const bx of h.boxes) {
+        if (cx > bx.x0 - CR && cx < bx.x1 + CR && cy > bx.y0 - CR && cy < bx.y1 + CR &&
+            cz > bx.z0 - CR && cz < bx.z1 + CR) { triggerCrash('Hit a wall!'); return; }
+      }
+    } else if (cy < wallH + CR) {
+      triggerCrash('Hit a house!'); return; // solid walls
+    }
     // Roof: a cone that narrows to a point, so only crash within its real slope
     // (not in the open air above the eaves).
-    if (cy < h.h) {
+    if (cy < h.h && cy > wallH - CR) {
       const coneR = Math.hypot(h.w, h.d) * 0.42 * ((h.h - cy) / (h.h - wallH)) + CR;
       if (Math.hypot(cx - h.x, cz - h.z) < coneR) { triggerCrash('Hit a house!'); return; }
     }
