@@ -1777,6 +1777,7 @@ const state = {
   // Race / lap timing
   nextGate: 0,     // index of the next checkpoint to fly through (in order)
   lapStart: 0,     // flightTime when the current lap began
+  lapRunning: false, // clock only runs once you've crossed the start/finish gate
   lastLap: null,   // seconds
   bestLap: null,   // seconds
   lapCount: 0,     // completed laps
@@ -3393,7 +3394,7 @@ function startFlight() {
   state.battery = 25.2;
   state.gatesPassed = 0;
   state.leavingMapWarningSent = false;
-  state.nextGate = 0; state.lapStart = 0; state.lastLap = null; state.bestLap = null; state.lapCount = 0;
+  state.nextGate = 0; state.lapStart = 0; state.lapRunning = false; state.lastLap = null; state.bestLap = null; state.lapCount = 0;
   world.gates.forEach(g => g.passed = false);
   craft.pos = SPAWN_POS.slice();
   craft.vel = [0, 0, 0];
@@ -3492,7 +3493,7 @@ function resetCraft() {
   // Crashing invalidates the current lap: restart the checkpoint sequence and
   // lap clock (best lap / lap count are kept).
   state.nextGate = 0;
-  state.lapStart = state.flightTime;
+  state.lapRunning = false;
   world.gates.forEach(g => g.passed = false);
   state.gatesPassed = 0;
   sticks.left.rawY = -1; // throttle back to bottom (0%)
@@ -3676,18 +3677,25 @@ function updatePhysics(dt) {
     const d = segPointDistance(ng.x, ng.y, ng.z, prevPos, craft.pos);
     if (d < ng.r) {
       ng.passed = true;
+      const passedIdx = state.nextGate;
       state.nextGate++;
       state.gatesPassed++;
       if (state.nextGate >= world.gates.length) {
-        // Lap complete — record the time, reset the sequence for the next lap.
+        // Lap complete — record the time, stop the clock until you re-cross the
+        // start gate, and reset the sequence for the next lap.
         const lap = state.flightTime - state.lapStart;
         state.lastLap = lap;
         if (state.bestLap == null || lap < state.bestLap) state.bestLap = lap;
         state.lapCount++;
-        state.lapStart = state.flightTime;
+        state.lapRunning = false;
         state.nextGate = 0;
         world.gates.forEach(gg => gg.passed = false);
         flashMsg(`LAP ${state.lapCount}  ${formatLap(lap)}` + (lap === state.bestLap ? '  ★ BEST' : ''));
+      } else if (passedIdx === 0) {
+        // Crossed the start/finish gate — the lap clock starts NOW.
+        state.lapStart = state.flightTime;
+        state.lapRunning = true;
+        flashMsg('GO!');
       } else {
         flashMsg('CHECKPOINT');
       }
@@ -3722,7 +3730,7 @@ function updatePhysics(dt) {
    ========================================================= */
 function updateHUD() {
   if (!state.flying) return;
-  document.getElementById('lap-cur').textContent = formatLap(state.flightTime - state.lapStart);
+  document.getElementById('lap-cur').textContent = formatLap(state.lapRunning ? state.flightTime - state.lapStart : 0);
   document.getElementById('alt').textContent = Math.max(0, craft.pos[1] - phys.groundY).toFixed(1);
   document.getElementById('spd').textContent = (Math.hypot(craft.vel[0], craft.vel[1], craft.vel[2]) * 3.6).toFixed(0);
   // Loaded voltage droops under throttle (only while armed), like a real pack.
