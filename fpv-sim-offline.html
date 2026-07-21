@@ -3094,6 +3094,9 @@ function buildCity3D(scene) {
   world.towers.forEach(t => {
     const g = new THREE.Group();
     let by = 0, cw = t.w, cd = t.d;
+    // Colliders match the tower's real shape (setbacks / round), so you don't
+    // clip an invisible full-height base box out beyond the actual building.
+    t.colliders = [];
 
     if (t.shape === 'cyl') {
       const r = Math.min(t.w, t.d) / 2;
@@ -3102,6 +3105,7 @@ function buildCity3D(scene) {
       body.castShadow = true; body.receiveShadow = true; g.add(body);
       const cap = new THREE.Mesh(cylGeo, parapetMat); cap.scale.set(r * 1.03, 0.6, r * 0.88); cap.position.y = t.h; g.add(cap);
       by = t.h; cw = r * 1.4; cd = r * 1.4;
+      t.colliders.push({ cyl: true, x: t.x, z: t.z, rx: r, rz: r * 0.85, y1: t.h });
     } else if (t.shape === 'fin') {
       const body = new THREE.Mesh(unit, facade(t, cw, t.h));
       body.scale.set(cw, t.h, cd); body.position.y = t.h / 2;
@@ -3117,6 +3121,7 @@ function buildCity3D(scene) {
       }
       const cap = new THREE.Mesh(unit, parapetMat); cap.scale.set(cw + 0.3, 0.45, cd + 0.3); cap.position.y = t.h; g.add(cap);
       by = t.h;
+      t.colliders.push({ x0: t.x - t.w / 2, x1: t.x + t.w / 2, z0: t.z - t.d / 2, z1: t.z + t.d / 2, y0: 0, y1: t.h });
     } else {
       const tiers = t.shape === 'taper' ? Math.max(3, t.tiers + 1) : t.tiers;
       const setback = t.shape === 'taper' ? 0.72 : t.shape === 'tier' ? 0.82 : 0.92;
@@ -3126,6 +3131,8 @@ function buildCity3D(scene) {
         box.scale.set(cw, tierH, cd); box.position.y = by + tierH / 2;
         box.castShadow = true; box.receiveShadow = true; g.add(box);
         const cap = new THREE.Mesh(unit, parapetMat); cap.scale.set(cw + 0.3, 0.4, cd + 0.3); cap.position.y = by + tierH; cap.castShadow = true; g.add(cap);
+        // One collider per tier — narrows with the setback.
+        t.colliders.push({ x0: t.x - cw / 2, x1: t.x + cw / 2, z0: t.z - cd / 2, z1: t.z + cd / 2, y0: by, y1: by + tierH });
         by += tierH; cw *= setback; cd *= setback;
       }
     }
@@ -3144,7 +3151,6 @@ function buildCity3D(scene) {
     }
     g.position.set(t.x, 0, MZ(t.z));
     scene.add(g);
-    t.box = { x0: t.x - t.w / 2, x1: t.x + t.w / 2, z0: t.z - t.d / 2, z1: t.z + t.d / 2, y1: t.h };
   });
 
   if (world.balloon) buildBalloon(scene, world.balloon);
@@ -4050,9 +4056,17 @@ function updatePhysics(dt) {
     }
   }
   for (const t of world.towers) {
-    const b = t.box;
-    if (cy < b.y1 + CR && cx > b.x0 - CR && cx < b.x1 + CR && cz > b.z0 - CR && cz < b.z1 + CR) {
-      triggerCrash('Hit a building!'); return;
+    if (!t.colliders) continue;
+    for (const c of t.colliders) {
+      if (c.cyl) {
+        if (cy < c.y1 + CR) {
+          const nx = (cx - c.x) / (c.rx + CR), nz = (cz - c.z) / (c.rz + CR);
+          if (nx * nx + nz * nz < 1) { triggerCrash('Hit a building!'); return; }
+        }
+      } else if (cy > c.y0 - CR && cy < c.y1 + CR &&
+                 cx > c.x0 - CR && cx < c.x1 + CR && cz > c.z0 - CR && cz < c.z1 + CR) {
+        triggerCrash('Hit a building!'); return;
+      }
     }
   }
   if (world.balloon) {
