@@ -1671,26 +1671,31 @@ function addRaceGates() {
   });
 }
 
-// CITY MAP: dense downtown of glass skyscrapers lining a wide avenue.
+// CITY MAP: sleek modern downtown — light-toned towers and blue glass in varied
+// architectural shapes, under an overcast sky (matches the reference).
 function buildCity() {
-  const glassColors = [0x8aa6b8, 0x6f8a9a, 0x9ab0be, 0x7d94a6, 0xa8b8c0, 0x5f7686, 0x93a2ad, 0x6a7f8c];
-  // Columns of towers on each side of the avenue; central corridor stays clear.
+  const paleColors = [0xdfe3e6, 0xcfd5da, 0xe6e9ec, 0xd4dade, 0xc6ccd0, 0xbfc7cc]; // white / silver concrete
+  const glassColors = [0x9db8cc, 0x86a6c2, 0xa9c2d4, 0x7fa0bb, 0xb4cad9, 0x93b2c8]; // blue glass
+  const shapes = ['box', 'tier', 'tier', 'cyl', 'fin', 'taper', 'box'];
   for (let side = -1; side <= 1; side += 2) {
     for (let col = 0; col < 3; col++) {
       const baseX = side * (18 + col * 21);
       let z = -44;
       while (z < 250) {
         const w = 8 + Math.random() * 7, d = 8 + Math.random() * 7;
-        // Height skewed: many mid-rise, a few soaring towers (col-independent).
         const h = 24 + Math.pow(Math.random(), 1.7) * 120;
         const x = baseX + (Math.random() - 0.5) * 5;
         const zc = z + (Math.random() - 0.5) * 5;
+        const glass = Math.random() < 0.55;
         if (Math.abs(x) > 10) {
           world.towers.push({
             x, z: zc, w, d, h,
-            color: glassColors[Math.floor(Math.random() * glassColors.length)],
+            glass,
+            color: glass ? glassColors[Math.floor(Math.random() * glassColors.length)]
+                         : paleColors[Math.floor(Math.random() * paleColors.length)],
+            shape: h > 85 && Math.random() < 0.5 ? 'taper' : shapes[Math.floor(Math.random() * shapes.length)],
             tiers: h > 78 ? 2 + Math.floor(Math.random() * 2) : 1,
-            antenna: h > 55 && Math.random() < 0.55,
+            antenna: h > 55 && Math.random() < 0.5,
             litSeed: Math.floor(Math.random() * 1e6),
           });
         }
@@ -1698,6 +1703,8 @@ function buildCity() {
       }
     }
   }
+  // A hot-air balloon drifting among the towers (a nod to the reference).
+  world.balloon = { x: 6, y: 66, z: 96, r: 5 };
   addRaceGates();
 }
 
@@ -1711,6 +1718,9 @@ function buildCity() {
 let canvas, W, H, lastTime = performance.now();
 let renderer, scene, camera3, composer, ready3d = false;
 let worldGroup = null; // swappable container for all map geometry (for map switching)
+// Atmosphere handles that change per map (jungle = warm/clear; city = overcast).
+let skyMesh, gradientSkyMat, cloudySkyMat, cloudUniforms, sunLight, hemiLight, fillLight, bloomPass;
+const sunSprites = [];
 
 // Our hex colours are authored in sRGB; the renderer works in linear space, so
 // convert each material's colour/emissive once to render true (not washed out).
@@ -1769,34 +1779,67 @@ function initRenderer() {
 
   camera3 = new THREE.PerspectiveCamera(config.camFov, 1, 0.1, 3000);
 
-  // Gradient sky dome
-  const skyMat = new THREE.ShaderMaterial({
+  // Sky dome — two swappable materials: a clear gradient (jungle) and a
+  // procedural cloudy overcast (city). The dome mesh keeps one material at a
+  // time via applyAtmosphere().
+  const skyVert = 'varying vec3 vW; void main(){ vec4 wp = modelMatrix * vec4(position,1.0); vW = wp.xyz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }';
+  gradientSkyMat = new THREE.ShaderMaterial({
     uniforms: {
       top: { value: new THREE.Color(0x2361c4) },
       bottom: { value: new THREE.Color(0x9fc4e0) },
       offset: { value: 60 }, exponent: { value: 0.7 },
     },
-    vertexShader: 'varying vec3 vW; void main(){ vec4 wp = modelMatrix * vec4(position,1.0); vW = wp.xyz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    vertexShader: skyVert,
     fragmentShader: 'varying vec3 vW; uniform vec3 top; uniform vec3 bottom; uniform float offset; uniform float exponent; void main(){ float h = normalize(vW + vec3(0.0, offset, 0.0)).y; float t = pow(max(h,0.0), exponent); gl_FragColor = vec4(mix(bottom, top, t), 1.0); }',
     side: THREE.BackSide, depthWrite: false, fog: false,
   });
-  scene.add(new THREE.Mesh(new THREE.SphereGeometry(2000, 32, 16), skyMat));
+  cloudUniforms = {
+    sunDir: { value: new THREE.Vector3(70, 105, -60).normalize() },
+    top: { value: new THREE.Color(0x36485a) }, horizon: { value: new THREE.Color(0xbcc7cf) },
+    cloudLo: { value: new THREE.Color(0x51606d) }, cloudHi: { value: new THREE.Color(0xbcc6cd) },
+    time: { value: 0 },
+  };
+  cloudySkyMat = new THREE.ShaderMaterial({
+    uniforms: cloudUniforms, vertexShader: skyVert, side: THREE.BackSide, depthWrite: false, fog: false,
+    fragmentShader: `
+      varying vec3 vW;
+      uniform vec3 sunDir, top, horizon, cloudLo, cloudHi; uniform float time;
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+      float noise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(hash(i),hash(i+vec2(1,0)),f.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x), f.y); }
+      float fbm(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p*=2.02; a*=0.5; } return v; }
+      void main(){
+        vec3 d = normalize(vW);
+        float h = clamp(d.y, 0.0, 1.0);
+        vec3 sky = mix(horizon, top, pow(h, 0.5));
+        vec2 uv = d.xz / (abs(d.y) + 0.26);
+        float f = fbm(uv * 1.5 + vec2(time*0.004, time*0.002));
+        float cover = smoothstep(0.30, 0.85, f) * smoothstep(-0.02, 0.30, d.y + 0.12);
+        vec3 cloud = mix(cloudLo, cloudHi, smoothstep(0.3,0.95,f));
+        sky = mix(sky, cloud, cover*0.9);
+        float s = max(dot(d, normalize(sunDir)), 0.0);
+        sky += vec3(0.9,0.93,0.96) * pow(s, 10.0) * 0.22;   // broad hazy glow
+        sky += vec3(1.0,0.99,0.96) * pow(s, 90.0) * 0.45;   // soft veiled disc
+        gl_FragColor = vec4(sky, 1.0);
+      }`,
+  });
+  skyMesh = new THREE.Mesh(new THREE.SphereGeometry(2000, 40, 20), gradientSkyMat);
+  scene.add(skyMesh);
 
-  // Lighting: a lower-intensity sky/ground fill so the warm sun dominates and
-  // gives real directional contrast (flat fill = flat, "gamey" look).
-  const hemi = new THREE.HemisphereLight(0xbfe0f5, 0x59683f, 0.85);
-  scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffe9c4, 2.15); // warm late-morning key
-  sun.position.set(70, 105, -60);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.bias = -0.0005;
-  sun.shadow.normalBias = 0.04; // kills self-shadow acne banding on flat ground/road
-  sun.shadow.radius = 9;         // soft, blurred shadow edges
-  // A dim cool bounce from the opposite side fills shadow cores without flattening.
-  const fill = new THREE.DirectionalLight(0xa8c4e0, 0.28);
-  fill.position.set(-60, 50, 70);
-  scene.add(fill);
+  // Lighting (values are set per-map in applyAtmosphere).
+  hemiLight = new THREE.HemisphereLight(0xbfe0f5, 0x59683f, 0.85);
+  scene.add(hemiLight);
+  sunLight = new THREE.DirectionalLight(0xffe9c4, 2.15);
+  sunLight.position.set(70, 105, -60);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.set(2048, 2048);
+  sunLight.shadow.bias = -0.0005;
+  sunLight.shadow.normalBias = 0.04; // kills self-shadow acne banding on flat ground/road
+  sunLight.shadow.radius = 9;         // soft, blurred shadow edges
+  fillLight = new THREE.DirectionalLight(0xa8c4e0, 0.28);
+  fillLight.position.set(-60, 50, 70);
+  scene.add(fillLight);
+  const sun = sunLight, hemi = hemiLight, fill = fillLight; // aliases for the shadow-cam setup below
   const s = 140;
   sun.shadow.camera.left = -s; sun.shadow.camera.right = s;
   sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
@@ -1819,7 +1862,7 @@ function initRenderer() {
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({
       map: tex, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending,
       depthWrite: false, fog: false }));
-    sp.position.copy(sunAt); sp.scale.set(size, size, 1); scene.add(sp); return sp;
+    sp.position.copy(sunAt); sp.scale.set(size, size, 1); scene.add(sp); sunSprites.push(sp); return sp;
   };
   sunSprite(radial([[0, 'rgba(255,244,214,0.55)'], [0.28, 'rgba(255,232,186,0.28)'], [0.6, 'rgba(255,220,165,0.08)'], [1, 'rgba(255,214,150,0)']]), 1500); // wide haze
   sunSprite(radial([[0, 'rgba(255,250,235,0.95)'], [0.3, 'rgba(255,244,214,0.5)'], [0.62, 'rgba(255,236,196,0.14)'], [1, 'rgba(255,232,190,0)']]), 620); // glow
@@ -1835,11 +1878,43 @@ function initRenderer() {
   composer.addPass(new THREE.RenderPass(scene, camera3));
   // Bloom tuned so only the brightest things — the sun and glass/gates — bloom
   // hard (the high-exposure glare), while mid-tones keep their contrast.
-  const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(1, 1), 0.28, 0.6, 0.86);
-  composer.addPass(bloom);
+  bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(1, 1), 0.28, 0.6, 0.86);
+  composer.addPass(bloomPass);
 
+  applyAtmosphere();
   ready3d = true;
   resizeCanvas();
+}
+
+// Set sky, sun, lights, fog and bloom for the current map. City is an overcast,
+// desaturated, diffuse look (per the reference); jungle is warm and clear.
+function applyAtmosphere() {
+  const city = config.map === 'city';
+  skyMesh.material = city ? cloudySkyMat : gradientSkyMat;
+  scene.background.setHex(city ? 0x8f9aa4 : 0x9ec9e8);
+  scene.fog.color.setHex(city ? 0xb3bec8 : 0xc3dcd4);
+  scene.fog.near = city ? 40 : 60;
+  scene.fog.far = city ? 320 : 330;
+  renderer.toneMappingExposure = city ? 1.04 : 1.05;
+
+  if (city) {
+    // Bright but flat overcast light — soft shadows, cool, no warm key.
+    hemiLight.color.setHex(0xdae2ea); hemiLight.groundColor.setHex(0xa89f8c); hemiLight.intensity = 1.7;
+    sunLight.color.setHex(0xe6edf4); sunLight.intensity = 1.15; sunLight.position.set(40, 120, -25);
+    sunLight.shadow.radius = 14; fillLight.color.setHex(0xccd6e0); fillLight.intensity = 0.55;
+    bloomPass.strength = 0.16; bloomPass.threshold = 0.9;
+  } else {
+    hemiLight.color.setHex(0xbfe0f5); hemiLight.groundColor.setHex(0x59683f); hemiLight.intensity = 0.85;
+    sunLight.color.setHex(0xffe9c4); sunLight.intensity = 2.15; sunLight.position.set(70, 105, -60);
+    sunLight.shadow.radius = 9; fillLight.color.setHex(0xa8c4e0); fillLight.intensity = 0.28;
+    bloomPass.strength = 0.28; bloomPass.threshold = 0.86;
+  }
+  // The overcast sun is a soft veiled patch (dim, cool, no hard disc); the clear
+  // sky keeps the bright warm billboard.
+  sunSprites.forEach((sp, i) => {
+    sp.material.color.setHex(city ? 0xcdd6de : 0xffffff);
+    sp.material.opacity = city ? (i === 2 ? 0.0 : 0.35) : 1.0;
+  });
 }
 
 // Map our forward-Z world onto Three's -Z (keeps left/right correct).
@@ -1938,17 +2013,18 @@ function makeWindowTexture() {
   const s = 256, c = _canvas(s), x = c.getContext('2d');
   const cols = 8, rows = 8, gap = 2;
   const cw = s / cols, ch = s / rows;
-  x.fillStyle = '#1a2026'; x.fillRect(0, 0, s, s); // dark mullion grid
+  x.fillStyle = '#828a92'; x.fillRect(0, 0, s, s); // silver mullion grid (defines floors)
   for (let r = 0; r < rows; r++) {
     for (let col = 0; col < cols; col++) {
-      const lit = Math.random() < 0.16;
+      const lit = Math.random() < 0.12;
       if (lit) {
-        const warm = Math.random() < 0.8;
-        x.fillStyle = warm ? `rgba(255,${210 + Math.random()*30|0},${150 + Math.random()*50|0},1)`
-                           : `rgba(200,225,255,1)`;
+        const warm = Math.random() < 0.75;
+        x.fillStyle = warm ? `rgba(255,${222 + Math.random()*25|0},${170 + Math.random()*50|0},1)`
+                           : `rgba(215,232,255,1)`;
       } else {
-        const v = 60 + Math.random() * 55 | 0; // dark glass reflection
-        x.fillStyle = `rgb(${v*0.8|0},${v*0.95|0},${v})`;
+        // Bright pale glass, gently varied — reads as a sunlit reflective facade.
+        const v = 180 + Math.random() * 55 | 0;
+        x.fillStyle = `rgb(${v*0.94|0},${v*0.98|0},${Math.min(255,v)|0})`;
       }
       x.fillRect(col * cw + gap, r * ch + gap, cw - gap * 2, ch - gap * 2);
     }
@@ -1956,81 +2032,128 @@ function makeWindowTexture() {
   return c;
 }
 
-// CITY renderer: asphalt avenue + tiered glass skyscrapers with rooftop
-// parapets, AC units and antennas. Adds solid AABB colliders to each tower.
+// CITY renderer: sandy ground + a paved avenue, and sleek towers in varied
+// shapes (box/tier/taper/cylinder/finned) in light concrete or blue glass, with
+// rooftop parapets, AC units and antennas. Adds solid AABB colliders per tower.
 function buildCity3D(scene) {
   const winCanvas = makeWindowTexture();
   const concreteCanvas = makeConcreteTexture();
   const unit = new THREE.BoxGeometry(1, 1, 1);
+  const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 24); // unit; scaled per tower
 
-  // Asphalt ground + wide avenue + concrete sidewalks.
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000),
-    new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 0.96, metalness: 0.0 }));
+  // Sandy ground + light paved avenue + concrete sidewalks (per reference).
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000),
+    new THREE.MeshStandardMaterial({ color: 0xccb994, roughness: 1.0, metalness: 0.0 }));
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
   const road = new THREE.Mesh(new THREE.PlaneGeometry(15, 5000),
-    new THREE.MeshStandardMaterial({ color: 0x1d2025, roughness: 0.88,
+    new THREE.MeshStandardMaterial({ color: 0xb7b1a4, map: _tex(concreteCanvas, 3, 1200), roughness: 0.95,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
   road.rotation.x = -Math.PI / 2; road.position.y = 0.04; road.receiveShadow = true; scene.add(road);
-  // Dashed centre line.
-  const lineMat = new THREE.MeshStandardMaterial({ color: 0xd8c15a, roughness: 0.7 });
-  for (let z = -200; z < 260; z += 8) {
-    const dash = new THREE.Mesh(unit, lineMat);
-    dash.scale.set(0.25, 0.02, 3); dash.position.set(0, 0.06, MZ(z)); scene.add(dash);
-  }
-  const swTex = _tex(concreteCanvas, 1, 1400);
   [-9.5, 9.5].forEach(sx => {
     const sw = new THREE.Mesh(new THREE.PlaneGeometry(4, 5000),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, map: swTex, roughness: 0.95,
+      new THREE.MeshStandardMaterial({ color: 0xd7d2c6, map: _tex(concreteCanvas, 1, 1400), roughness: 0.95,
         polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
     sw.rotation.x = -Math.PI / 2; sw.position.set(sx, 0.03, 0); sw.receiveShadow = true; scene.add(sw);
   });
 
-  const parapetMat = new THREE.MeshStandardMaterial({ color: 0x2c3138, roughness: 0.9 });
-  const acMat = new THREE.MeshStandardMaterial({ color: 0x51565e, roughness: 0.9 });
-  const antMat = new THREE.MeshStandardMaterial({ color: 0x2a2e33, metalness: 0.6, roughness: 0.4 });
-  const beaconMat = new THREE.MeshStandardMaterial({ color: 0xff5a4d, emissive: 0xff2a1e, emissiveIntensity: 1.6 });
+  const parapetMat = new THREE.MeshStandardMaterial({ color: 0xb6bac0, roughness: 0.85 });
+  const acMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.9 });
+  const antMat = new THREE.MeshStandardMaterial({ color: 0x3a3e44, metalness: 0.6, roughness: 0.4 });
+  const beaconMat = new THREE.MeshStandardMaterial({ color: 0xff5a4d, emissive: 0xff2a1e, emissiveIntensity: 1.4 });
+
+  // Facade material: blue reflective glass or light concrete, with a window map.
+  const facade = (t, cw, hgt) => {
+    const tex = new THREE.CanvasTexture(winCanvas);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(Math.max(2, Math.round(cw / 2.2)), Math.max(3, Math.round(hgt / 3)));
+    tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
+    return t.glass
+      ? new THREE.MeshStandardMaterial({ color: new THREE.Color(t.color), map: tex, emissiveMap: tex, emissive: 0x9fb8cf, emissiveIntensity: 0.3, metalness: 0.25, roughness: 0.22 })
+      : new THREE.MeshStandardMaterial({ color: new THREE.Color(t.color), map: tex, emissiveMap: tex, emissive: 0xffe6c0, emissiveIntensity: 0.22, metalness: 0.1, roughness: 0.62 });
+  };
 
   world.towers.forEach(t => {
     const g = new THREE.Group();
     let by = 0, cw = t.w, cd = t.d;
-    for (let i = 0; i < t.tiers; i++) {
-      const tierH = t.h / t.tiers;
-      // Per-tier glass with window map + emissive lit windows.
-      const tex = new THREE.CanvasTexture(winCanvas);
-      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(Math.max(2, Math.round(cw / 2.2)), Math.max(3, Math.round(tierH / 3)));
-      tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
-      const glass = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(t.color), map: tex, emissiveMap: tex,
-        emissive: 0xffdca8, emissiveIntensity: 0.55, metalness: 0.35, roughness: 0.34 });
-      const box = new THREE.Mesh(unit, glass);
-      box.scale.set(cw, tierH, cd); box.position.y = by + tierH / 2;
-      box.castShadow = true; box.receiveShadow = true; g.add(box);
-      // Parapet cap at the top of each tier.
-      const cap = new THREE.Mesh(unit, parapetMat);
-      cap.scale.set(cw + 0.3, 0.5, cd + 0.3); cap.position.y = by + tierH; cap.castShadow = true; g.add(cap);
-      by += tierH; cw *= 0.82; cd *= 0.82;
+
+    if (t.shape === 'cyl') {
+      const r = Math.min(t.w, t.d) / 2;
+      const body = new THREE.Mesh(cylGeo, facade(t, r * 2, t.h));
+      body.scale.set(r, t.h, r * 0.85); body.position.y = t.h / 2;
+      body.castShadow = true; body.receiveShadow = true; g.add(body);
+      const cap = new THREE.Mesh(cylGeo, parapetMat); cap.scale.set(r * 1.03, 0.6, r * 0.88); cap.position.y = t.h; g.add(cap);
+      by = t.h; cw = r * 1.4; cd = r * 1.4;
+    } else if (t.shape === 'fin') {
+      const body = new THREE.Mesh(unit, facade(t, cw, t.h));
+      body.scale.set(cw, t.h, cd); body.position.y = t.h / 2;
+      body.castShadow = true; body.receiveShadow = true; g.add(body);
+      const nF = Math.max(3, Math.round(cw / 1.6));
+      for (let i = 0; i < nF; i++) {
+        const fx = -cw / 2 + (i + 0.5) * cw / nF;
+        [cd / 2, -cd / 2].forEach(fz => {
+          const fin = new THREE.Mesh(unit, parapetMat);
+          fin.scale.set(0.16, t.h * 0.98, 0.42); fin.position.set(fx, t.h / 2, fz);
+          fin.castShadow = true; g.add(fin);
+        });
+      }
+      const cap = new THREE.Mesh(unit, parapetMat); cap.scale.set(cw + 0.3, 0.45, cd + 0.3); cap.position.y = t.h; g.add(cap);
+      by = t.h;
+    } else {
+      const tiers = t.shape === 'taper' ? Math.max(3, t.tiers + 1) : t.tiers;
+      const setback = t.shape === 'taper' ? 0.72 : t.shape === 'tier' ? 0.82 : 0.92;
+      for (let i = 0; i < tiers; i++) {
+        const tierH = t.h / tiers;
+        const box = new THREE.Mesh(unit, facade(t, cw, tierH));
+        box.scale.set(cw, tierH, cd); box.position.y = by + tierH / 2;
+        box.castShadow = true; box.receiveShadow = true; g.add(box);
+        const cap = new THREE.Mesh(unit, parapetMat); cap.scale.set(cw + 0.3, 0.4, cd + 0.3); cap.position.y = by + tierH; cap.castShadow = true; g.add(cap);
+        by += tierH; cw *= setback; cd *= setback;
+      }
     }
-    // Rooftop clutter on the top tier.
-    for (let i = 0; i < 2 + (Math.floor(t.litSeed) % 3); i++) {
+    // Rooftop clutter.
+    for (let i = 0; i < 1 + (Math.floor(t.litSeed) % 3); i++) {
       const ac = new THREE.Mesh(unit, acMat);
-      const s2 = 0.8 + Math.random() * 1.4;
-      ac.scale.set(s2, 0.6 + Math.random() * 0.8, s2);
-      ac.position.set((Math.random() - 0.5) * cw * 0.7, by + 0.4, (Math.random() - 0.5) * cd * 0.7);
-      ac.castShadow = true; g.add(ac);
+      const s2 = 0.7 + Math.random() * 1.1; ac.scale.set(s2, 0.5 + Math.random() * 0.7, s2);
+      ac.position.set((Math.random() - 0.5) * cw * 0.6, by + 0.35, (Math.random() - 0.5) * cd * 0.6); ac.castShadow = true; g.add(ac);
     }
     if (t.antenna) {
-      const antH = 3 + Math.random() * 7;
-      const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.16, antH, 6), antMat);
+      const antH = 3 + Math.random() * 8;
+      const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.14, antH, 6), antMat);
       ant.position.set(0, by + antH / 2, 0); ant.castShadow = true; g.add(ant);
-      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 6), beaconMat);
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 6), beaconMat);
       beacon.position.set(0, by + antH, 0); g.add(beacon);
     }
     g.position.set(t.x, 0, MZ(t.z));
     scene.add(g);
-    // Collider: full base footprint up to the total height.
     t.box = { x0: t.x - t.w / 2, x1: t.x + t.w / 2, z0: t.z - t.d / 2, z1: t.z + t.d / 2, y1: t.h };
   });
+
+  if (world.balloon) buildBalloon(scene, world.balloon);
+}
+
+// A striped hot-air balloon (envelope + neck + basket + ropes).
+function buildBalloon(scene, b) {
+  const g = new THREE.Group();
+  const c = _canvas(64), x = c.getContext('2d');
+  const stripes = ['#e8b23a', '#e2622f', '#d83b2e', '#e8b23a', '#f0d24a', '#e2622f'];
+  for (let i = 0; i < 8; i++) { x.fillStyle = stripes[i % stripes.length]; x.fillRect(i * 8, 0, 8, 64); }
+  const tex = new THREE.CanvasTexture(c); tex.wrapS = THREE.RepeatWrapping; tex.encoding = THREE.sRGBEncoding;
+  const env = new THREE.Mesh(
+    new THREE.SphereGeometry(b.r, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.74),
+    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7, metalness: 0.0 }));
+  env.scale.set(1, 1.15, 1); env.position.y = b.r * 1.05; env.castShadow = true; g.add(env);
+  const neck = new THREE.Mesh(new THREE.ConeGeometry(b.r * 0.32, b.r * 0.5, 12),
+    new THREE.MeshStandardMaterial({ color: 0xd83b2e, roughness: 0.7 }));
+  neck.position.y = b.r * 0.5; neck.rotation.x = Math.PI; g.add(neck);
+  const basket = new THREE.Mesh(new THREE.BoxGeometry(b.r * 0.5, b.r * 0.4, b.r * 0.5),
+    new THREE.MeshStandardMaterial({ color: 0x8a5a2c, roughness: 0.9 }));
+  basket.castShadow = true; g.add(basket);
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a });
+  [[0.22, 0.22], [-0.22, 0.22], [0.22, -0.22], [-0.22, -0.22]].forEach(([rx, rz]) => {
+    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, b.r * 0.6, 4), ropeMat);
+    rope.position.set(rx * b.r, b.r * 0.32, rz * b.r); g.add(rope);
+  });
+  g.position.set(b.x, b.y, MZ(b.z)); scene.add(g);
 }
 
 function buildScene() {
@@ -2511,6 +2634,7 @@ function renderWorld() {
 function buildMapData() {
   ['houses', 'palms', 'jungle', 'bushes', 'rocks', 'logs', 'driveways', 'walls', 'gates', 'towers']
     .forEach(k => { world[k].length = 0; });
+  world.balloon = null;
   if (config.map === 'city') buildCity(); else buildNeighborhood();
 }
 
@@ -2546,6 +2670,7 @@ function setMap(name) {
   if (j) j.classList.toggle('active', name === 'jungle');
   if (c) c.classList.toggle('active', name === 'city');
   rebuildWorld();
+  applyAtmosphere();
   if (state.flying) startFlight(); // restart on the new map
 }
 
@@ -2911,6 +3036,12 @@ function updatePhysics(dt) {
       triggerCrash('Hit a building!'); return;
     }
   }
+  if (world.balloon) {
+    const bl = world.balloon;
+    if (Math.hypot(cx - bl.x, cy - (bl.y + bl.r), cz - bl.z) < bl.r + CR) {
+      triggerCrash('Hit the balloon!'); return;
+    }
+  }
 
   // Checkpoints must be flown IN ORDER — only the next gate is live. Use the
   // distance from the gate centre to the whole travel segment this frame so
@@ -2997,6 +3128,7 @@ function animate() {
   updateGamepadStatus();
   updatePhysics(dt);
   applyWind(now);
+  if (config.map === 'city' && cloudUniforms) cloudUniforms.time.value = now * 0.001;
   renderWorld();
   renderSticks();
   updateHUD();
