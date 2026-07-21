@@ -486,7 +486,12 @@ button.secondary {
 <div id="overlay">
   <div class="menu-container">
     <h1>FPV FLIGHT SIM</h1>
-    <p>5" Freestyle Quad · Residential Streets · Acro Mode</p>
+    <p>5" Freestyle Quad · Acro Mode</p>
+
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+      <button class="mode-btn active" id="map-jungle" onclick="setMap('jungle')">🌴 Jungle</button>
+      <button class="mode-btn" id="map-city" onclick="setMap('city')">🏙️ City</button>
+    </div>
 
     <div class="tabs">
       <button class="tab-btn active" data-tab="rates">RATES</button>
@@ -742,6 +747,7 @@ const config = {
   remoteSmooth: 0.05, // seconds — lighter low-pass for the physical controller
   propwash: 0.05,   // 0..1 — turbulence when descending through your own prop wake
   inputMode: 'touch', // 'touch' = on-screen sticks; 'remote' = gamepad / USB radio
+  map: 'jungle',    // 'jungle' = neighbourhood/jungle; 'city' = downtown skyscrapers
 };
 
 // Smoothed (low-passed) angular rates so quick stick jabs ramp in.
@@ -1494,7 +1500,7 @@ const phys = {
 /* =========================================================
    NEIGHBORHOOD WORLD (real 3D objects, perspective-projected)
    ========================================================= */
-const world = { houses: [], palms: [], jungle: [], bushes: [], rocks: [], logs: [], driveways: [], walls: [], gates: [] };
+const world = { houses: [], palms: [], jungle: [], bushes: [], rocks: [], logs: [], driveways: [], walls: [], gates: [], towers: [] };
 
 // Map boundary: flying past this radius from spawn triggers the "leaving map" warning.
 const MAP_BOUNDS = { radius: 175, warnMargin: 15 };
@@ -1632,10 +1638,15 @@ function buildNeighborhood() {
     world.walls.push({ x, z, w: 6, h: 0.9 });
   });
 
-  // RACE CIRCUIT: an ordered loop of checkpoint gates. You fly out low down the
-  // corridor, spiral up through a CORKSCREW at the far end, then race back high
-  // above the outbound line to the start/finish. Gates must be taken in order;
-  // completing the sequence scores a lap. (roll tilts the ring for the spiral.)
+  addRaceGates();
+}
+
+// RACE CIRCUIT: an ordered loop of checkpoint gates (shared by every map). You
+// fly out low down the corridor, spiral up through a CORKSCREW at the far end,
+// then race back high above the outbound line to the start/finish. Gates must
+// be taken in order; completing the sequence scores a lap. (roll tilts the ring
+// for the spiral.)
+function addRaceGates() {
   const gateSpecs = [];
   const R = 2.2; // gate radius — scaled up for racing
   const add = (x, y, z, roll = 0) => gateSpecs.push({ x, y, z, r: R, roll });
@@ -1643,8 +1654,6 @@ function buildNeighborhood() {
   add(0, 3.0, 4);    // 0 — START / FINISH (low)
   add(0, 3.0, 22);   // 1
   add(0, 3.4, 42);   // 2  outbound, low
-  // Corkscrew: 4 gates spiralling one full turn around the corridor axis while
-  // climbing, at the far end of the street.
   const cs = { cx: 0, cy: 6.5, rad: 3.0, z0: 56, dz: 8 };
   for (let k = 0; k < 4; k++) {
     const th = (k / 4) * Math.PI * 2;
@@ -1656,11 +1665,40 @@ function buildNeighborhood() {
   add(0, 9.5, 62);   // 8  return leg, high above the outbound line
   add(0, 9.5, 34);   // 9
   add(0, 6.5, 12);   // 10 descending toward the finish
-  // …then back through gate 0 completes the lap.
 
   gateSpecs.forEach(({ x, y, z, r, roll }, i) => {
     world.gates.push({ x, y, z, r, roll, order: i, cork: i >= 3 && i <= 6, passed: false });
   });
+}
+
+// CITY MAP: dense downtown of glass skyscrapers lining a wide avenue.
+function buildCity() {
+  const glassColors = [0x8aa6b8, 0x6f8a9a, 0x9ab0be, 0x7d94a6, 0xa8b8c0, 0x5f7686, 0x93a2ad, 0x6a7f8c];
+  // Columns of towers on each side of the avenue; central corridor stays clear.
+  for (let side = -1; side <= 1; side += 2) {
+    for (let col = 0; col < 3; col++) {
+      const baseX = side * (18 + col * 21);
+      let z = -44;
+      while (z < 250) {
+        const w = 8 + Math.random() * 7, d = 8 + Math.random() * 7;
+        // Height skewed: many mid-rise, a few soaring towers (col-independent).
+        const h = 24 + Math.pow(Math.random(), 1.7) * 120;
+        const x = baseX + (Math.random() - 0.5) * 5;
+        const zc = z + (Math.random() - 0.5) * 5;
+        if (Math.abs(x) > 10) {
+          world.towers.push({
+            x, z: zc, w, d, h,
+            color: glassColors[Math.floor(Math.random() * glassColors.length)],
+            tiers: h > 78 ? 2 + Math.floor(Math.random() * 2) : 1,
+            antenna: h > 55 && Math.random() < 0.55,
+            litSeed: Math.floor(Math.random() * 1e6),
+          });
+        }
+        z += 20 + Math.random() * 9;
+      }
+    }
+  }
+  addRaceGates();
 }
 
 /* =========================================================
@@ -1672,6 +1710,21 @@ function buildNeighborhood() {
    ========================================================= */
 let canvas, W, H, lastTime = performance.now();
 let renderer, scene, camera3, composer, ready3d = false;
+let worldGroup = null; // swappable container for all map geometry (for map switching)
+
+// Our hex colours are authored in sRGB; the renderer works in linear space, so
+// convert each material's colour/emissive once to render true (not washed out).
+function linearizeMaterials(root) {
+  const seen = new Set();
+  root.traverse(o => {
+    if (!o.material) return;
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+      if (seen.has(m)) return; seen.add(m);
+      if (m.color && m.color.isColor) m.color.convertSRGBToLinear();
+      if (m.emissive && m.emissive.isColor) m.emissive.convertSRGBToLinear();
+    });
+  });
+}
 let gateArrow = null; // bobbing marker over the active checkpoint
 const windObjects = []; // canopies/fronds that sway in the breeze
 
@@ -1772,22 +1825,10 @@ function initRenderer() {
   sunSprite(radial([[0, 'rgba(255,250,235,0.95)'], [0.3, 'rgba(255,244,214,0.5)'], [0.62, 'rgba(255,236,196,0.14)'], [1, 'rgba(255,232,190,0)']]), 620); // glow
   sunSprite(radial([[0, 'rgba(255,255,255,1)'], [0.42, 'rgba(255,253,246,0.98)'], [0.72, 'rgba(255,248,226,0.5)'], [1, 'rgba(255,244,214,0)']]), 230); // hot core
 
+  worldGroup = new THREE.Group();
+  scene.add(worldGroup);
   buildScene();
-
-  // Colour management: our hex colours are authored in sRGB, but the renderer
-  // works in linear space and encodes to sRGB on output. Convert every
-  // material colour/emissive to linear so surfaces render true instead of
-  // washed-out. (The sky ShaderMaterial has no .color, so it's skipped.)
-  const _converted = new Set();
-  scene.traverse(o => {
-    if (!o.material) return;
-    (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-      if (_converted.has(m)) return;           // convert each unique material once
-      _converted.add(m);
-      if (m.color && m.color.isColor) m.color.convertSRGBToLinear();
-      if (m.emissive && m.emissive.isColor) m.emissive.convertSRGBToLinear();
-    });
-  });
+  linearizeMaterials(scene);
 
   // Post-processing: UnrealBloomPass gives the emissive gates / highlights a glow.
   composer = new THREE.EffectComposer(renderer);
@@ -1890,7 +1931,118 @@ function makeConcreteTexture() {
   return c;
 }
 
+// Skyscraper glass: a grid of window cells on dark mullions; a scattering are
+// "lit" (warm) so the facade reads as an occupied tower. Returned as a canvas
+// so each tower can clone it with its own repeat + tint.
+function makeWindowTexture() {
+  const s = 256, c = _canvas(s), x = c.getContext('2d');
+  const cols = 8, rows = 8, gap = 2;
+  const cw = s / cols, ch = s / rows;
+  x.fillStyle = '#1a2026'; x.fillRect(0, 0, s, s); // dark mullion grid
+  for (let r = 0; r < rows; r++) {
+    for (let col = 0; col < cols; col++) {
+      const lit = Math.random() < 0.16;
+      if (lit) {
+        const warm = Math.random() < 0.8;
+        x.fillStyle = warm ? `rgba(255,${210 + Math.random()*30|0},${150 + Math.random()*50|0},1)`
+                           : `rgba(200,225,255,1)`;
+      } else {
+        const v = 60 + Math.random() * 55 | 0; // dark glass reflection
+        x.fillStyle = `rgb(${v*0.8|0},${v*0.95|0},${v})`;
+      }
+      x.fillRect(col * cw + gap, r * ch + gap, cw - gap * 2, ch - gap * 2);
+    }
+  }
+  return c;
+}
+
+// CITY renderer: asphalt avenue + tiered glass skyscrapers with rooftop
+// parapets, AC units and antennas. Adds solid AABB colliders to each tower.
+function buildCity3D(scene) {
+  const winCanvas = makeWindowTexture();
+  const concreteCanvas = makeConcreteTexture();
+  const unit = new THREE.BoxGeometry(1, 1, 1);
+
+  // Asphalt ground + wide avenue + concrete sidewalks.
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000),
+    new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 0.96, metalness: 0.0 }));
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(15, 5000),
+    new THREE.MeshStandardMaterial({ color: 0x1d2025, roughness: 0.88,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  road.rotation.x = -Math.PI / 2; road.position.y = 0.04; road.receiveShadow = true; scene.add(road);
+  // Dashed centre line.
+  const lineMat = new THREE.MeshStandardMaterial({ color: 0xd8c15a, roughness: 0.7 });
+  for (let z = -200; z < 260; z += 8) {
+    const dash = new THREE.Mesh(unit, lineMat);
+    dash.scale.set(0.25, 0.02, 3); dash.position.set(0, 0.06, MZ(z)); scene.add(dash);
+  }
+  const swTex = _tex(concreteCanvas, 1, 1400);
+  [-9.5, 9.5].forEach(sx => {
+    const sw = new THREE.Mesh(new THREE.PlaneGeometry(4, 5000),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, map: swTex, roughness: 0.95,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+    sw.rotation.x = -Math.PI / 2; sw.position.set(sx, 0.03, 0); sw.receiveShadow = true; scene.add(sw);
+  });
+
+  const parapetMat = new THREE.MeshStandardMaterial({ color: 0x2c3138, roughness: 0.9 });
+  const acMat = new THREE.MeshStandardMaterial({ color: 0x51565e, roughness: 0.9 });
+  const antMat = new THREE.MeshStandardMaterial({ color: 0x2a2e33, metalness: 0.6, roughness: 0.4 });
+  const beaconMat = new THREE.MeshStandardMaterial({ color: 0xff5a4d, emissive: 0xff2a1e, emissiveIntensity: 1.6 });
+
+  world.towers.forEach(t => {
+    const g = new THREE.Group();
+    let by = 0, cw = t.w, cd = t.d;
+    for (let i = 0; i < t.tiers; i++) {
+      const tierH = t.h / t.tiers;
+      // Per-tier glass with window map + emissive lit windows.
+      const tex = new THREE.CanvasTexture(winCanvas);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(Math.max(2, Math.round(cw / 2.2)), Math.max(3, Math.round(tierH / 3)));
+      tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
+      const glass = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(t.color), map: tex, emissiveMap: tex,
+        emissive: 0xffdca8, emissiveIntensity: 0.55, metalness: 0.35, roughness: 0.34 });
+      const box = new THREE.Mesh(unit, glass);
+      box.scale.set(cw, tierH, cd); box.position.y = by + tierH / 2;
+      box.castShadow = true; box.receiveShadow = true; g.add(box);
+      // Parapet cap at the top of each tier.
+      const cap = new THREE.Mesh(unit, parapetMat);
+      cap.scale.set(cw + 0.3, 0.5, cd + 0.3); cap.position.y = by + tierH; cap.castShadow = true; g.add(cap);
+      by += tierH; cw *= 0.82; cd *= 0.82;
+    }
+    // Rooftop clutter on the top tier.
+    for (let i = 0; i < 2 + (Math.floor(t.litSeed) % 3); i++) {
+      const ac = new THREE.Mesh(unit, acMat);
+      const s2 = 0.8 + Math.random() * 1.4;
+      ac.scale.set(s2, 0.6 + Math.random() * 0.8, s2);
+      ac.position.set((Math.random() - 0.5) * cw * 0.7, by + 0.4, (Math.random() - 0.5) * cd * 0.7);
+      ac.castShadow = true; g.add(ac);
+    }
+    if (t.antenna) {
+      const antH = 3 + Math.random() * 7;
+      const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.16, antH, 6), antMat);
+      ant.position.set(0, by + antH / 2, 0); ant.castShadow = true; g.add(ant);
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 6), beaconMat);
+      beacon.position.set(0, by + antH, 0); g.add(beacon);
+    }
+    g.position.set(t.x, 0, MZ(t.z));
+    scene.add(g);
+    // Collider: full base footprint up to the total height.
+    t.box = { x0: t.x - t.w / 2, x1: t.x + t.w / 2, z0: t.z - t.d / 2, z1: t.z + t.d / 2, y1: t.h };
+  });
+}
+
 function buildScene() {
+  const scene = worldGroup;
+  windObjects.length = 0;
+  if (config.map === 'city') { buildCity3D(scene); renderGates(scene); return; }
+  buildJungleScene();
+  renderGates(scene);
+}
+
+function buildJungleScene() {
+  const scene = worldGroup;
   const grassTex = makeGrassTexture();
   const brickTex = makeBrickTexture();
   const roofTex = makeRoofTexture();
@@ -2273,7 +2425,10 @@ function buildScene() {
     scene.add(m);
   });
 
-  // Checkpoint gates: glowing torus rings. Corkscrew gates roll to spiral.
+}
+
+// Checkpoint gates + labels + active-gate arrow (shared by every map).
+function renderGates(scene) {
   world.gates.forEach(g => {
     const mat = new THREE.MeshStandardMaterial({
       color: 0xf0c168, emissive: 0xd9a441, emissiveIntensity: 1.3,
@@ -2352,8 +2507,50 @@ function renderWorld() {
 /* =========================================================
    INIT
    ========================================================= */
+// Populate world data for the selected map (clears the previous map's arrays).
+function buildMapData() {
+  ['houses', 'palms', 'jungle', 'bushes', 'rocks', 'logs', 'driveways', 'walls', 'gates', 'towers']
+    .forEach(k => { world[k].length = 0; });
+  if (config.map === 'city') buildCity(); else buildNeighborhood();
+}
+
+function disposeGroup(root) {
+  root.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+      if (m.map) m.map.dispose();
+      if (m.emissiveMap && m.emissiveMap !== m.map) m.emissiveMap.dispose();
+      m.dispose();
+    });
+  });
+}
+
+// Tear down the current map's geometry and rebuild for config.map.
+function rebuildWorld() {
+  if (!worldGroup) return;
+  scene.remove(worldGroup);
+  disposeGroup(worldGroup);
+  worldGroup = new THREE.Group();
+  scene.add(worldGroup);
+  gateArrow = null;
+  buildMapData();
+  buildScene();
+  linearizeMaterials(worldGroup);
+}
+
+// Menu map picker.
+function setMap(name) {
+  if (config.map === name) return;
+  config.map = name;
+  const j = document.getElementById('map-jungle'), c = document.getElementById('map-city');
+  if (j) j.classList.toggle('active', name === 'jungle');
+  if (c) c.classList.toggle('active', name === 'city');
+  rebuildWorld();
+  if (state.flying) startFlight(); // restart on the new map
+}
+
 window.onload = () => {
-  buildNeighborhood();
+  buildMapData();
   initRenderer();
   window.addEventListener('resize', resizeCanvas);
 
@@ -2706,6 +2903,12 @@ function updatePhysics(dt) {
     // … and the leafy crown up top.
     if (Math.hypot(cx - t.x, cy - (t.h + 0.2), cz - t.z) < t.spread + CR) {
       triggerCrash('Hit a tree!'); return;
+    }
+  }
+  for (const t of world.towers) {
+    const b = t.box;
+    if (cy < b.y1 + CR && cx > b.x0 - CR && cx < b.x1 + CR && cz > b.z0 - CR && cz < b.z1 + CR) {
+      triggerCrash('Hit a building!'); return;
     }
   }
 
