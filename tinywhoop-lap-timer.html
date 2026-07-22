@@ -247,8 +247,8 @@ select {
     <h2>SETTINGS</h2>
 
     <div class="row">
-      <label>Sensitivity — how big a change in the gate counts as a whoop passing (<span class="val" id="sensVal"></span>)</label>
-      <input type="range" id="sens" min="4" max="120" step="1">
+      <label>Sensitivity — % of the gate that must change as the whoop passes; <b>lower = more sensitive</b> (<span class="val" id="sensVal"></span>%)</label>
+      <input type="range" id="sens" min="0.5" max="25" step="0.5" value="2">
     </div>
 
     <div class="row">
@@ -350,6 +350,14 @@ select {
   const frontTog = document.getElementById('frontTog');
   const testVoiceBtn = document.getElementById('testVoiceBtn');
 
+  // ---------- Detection tuning ----------
+  // A pixel counts as "moving" when its luma changes by more than PIX_DELTA
+  // between frames. Detection then triggers on the PERCENT of the gate area
+  // that is moving — this catches a small/fast whoop far better than averaging
+  // the change across the whole box (which needed the whoop to nearly fill it).
+  const PIX_DELTA = 22;   // 0..255 per-pixel change to count as motion
+  const ACT_FULL  = 25;   // % motion that fills the activity bar / slider top
+
   // ---------- State ----------
   const state = {
     running: false,
@@ -360,9 +368,9 @@ select {
     lapStart: 0,             // when current lap started
     laps: [],                // completed lap durations (ms)
     best: Infinity,
-    sensitivity: 26,         // mean-abs-diff threshold
+    sensitivity: 2,          // % of gate area that must change to trigger
     lockout: 1200,           // ms lockout after a pass
-    activity: 0,             // smoothed current activity
+    activity: 0,             // smoothed current activity (% moving)
     settings: {},
   };
 
@@ -371,7 +379,9 @@ select {
   function loadSettings() {
     let s = {};
     try { s = JSON.parse(localStorage.getItem(SKEY) || '{}'); } catch (e) {}
-    sens.value = s.sensitivity != null ? s.sensitivity : 26;
+    // Ignore values saved under the old (mean-diff) scale, which used a much
+    // larger range; anything outside the new slider range falls back to default.
+    sens.value = (s.sensitivity != null && s.sensitivity >= 0.5 && s.sensitivity <= 25) ? s.sensitivity : 2;
     lock.value = s.lockout != null ? s.lockout : 1200;
     rate.value = s.rate != null ? s.rate : 1.0;
     speakTog.checked = s.speak !== false;
@@ -402,7 +412,7 @@ select {
     sensVal.textContent = sens.value;
     lockVal.textContent = lock.value;
     rateVal.textContent = (+rate.value).toFixed(2);
-    threshMark.style.left = Math.min(100, (state.sensitivity / 120) * 100) + '%';
+    threshMark.style.left = Math.min(100, (state.sensitivity / ACT_FULL) * 100) + '%';
     video.classList.toggle('mirror', frontTog.checked);
     gate.classList.toggle('locked', lockGateTog.checked);
   }
@@ -512,24 +522,25 @@ select {
     let diff = 0;
     if (state.prevGray) {
       const prev = state.prevGray;
-      let sum = 0;
+      let changed = 0;
       for (let j = 0; j < n; j++) {
-        const d = gray[j] - prev[j];
-        sum += d < 0 ? -d : d;
+        let d = gray[j] - prev[j];
+        if (d < 0) d = -d;
+        if (d > PIX_DELTA) changed++;   // count pixels in motion
       }
-      diff = sum / n; // mean absolute difference 0..255
+      diff = (changed / n) * 100; // percent of gate area moving, 0..100
     }
     // store current as prev (swap buffers)
     if (!state.prevGray) state.prevGray = new Uint8ClampedArray(n);
     state.prevGray.set(gray);
 
-    // Smooth the activity a touch for a stable bar.
-    state.activity = state.activity * 0.5 + diff * 0.5;
+    // Light smoothing for a stable bar (detection still uses the raw spike).
+    state.activity = state.activity * 0.4 + diff * 0.6;
 
     // Update activity bar occasionally.
     if (ts - lastActivityDraw > 40) {
       lastActivityDraw = ts;
-      const pct = Math.min(100, (state.activity / 120) * 100);
+      const pct = Math.min(100, (state.activity / ACT_FULL) * 100);
       activityBar.style.width = pct + '%';
       const hot = state.activity >= state.sensitivity;
       activityBar.style.background = hot ? 'var(--warn)' : 'var(--accent)';
@@ -730,7 +741,7 @@ select {
     const beginRandom = () => {
       if (!state.arming) return; // cancelled via STOP
       curSubEl.textContent = 'Starting on the tone…';
-      const delay = 2000 + Math.random() * 3000; // 2.0–5.0s → "in less than five"
+      const delay = 1000 + Math.random() * 4000; // 1.0–5.0s → "in less than five"
       state.startTimer = setTimeout(fireStart, delay);
     };
 
