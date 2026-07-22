@@ -4,8 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lap RF">
+<meta name="theme-color" content="#070a0e">
 <title>TinyWhoop Lap RF — Camera Gate Timer</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
@@ -292,6 +299,8 @@ select {
   <p style="font-size:13px">This app needs your <b>camera</b> to see the gate. Nothing is recorded or uploaded — all detection runs on your device.</p>
   <button id="permBtn">ENABLE CAMERA</button>
   <div id="permErr"></div>
+  <button id="installBtn" style="display:none;background:none;border:1px solid rgba(255,255,255,0.25);color:var(--text);border-radius:14px;padding:12px 22px;font-size:15px;font-weight:700;letter-spacing:0.5px;cursor:pointer">📲 INSTALL AS APP</button>
+  <div id="iosHint" style="display:none;font-size:13px;color:var(--muted);max-width:320px;line-height:1.5">Install to your Home Screen: tap the <b>Share</b> icon, then <b>Add to Home Screen</b>. It then opens full-screen like a native app.</div>
 </div>
 
 <script>
@@ -752,6 +761,44 @@ select {
   window.addEventListener('touchmove', moveDrag, { passive: false });
   window.addEventListener('mouseup', endDrag);
   window.addEventListener('touchend', endDrag);
+
+  // ---------- PWA: install prompt + service worker ----------
+  const installBtn = document.getElementById('installBtn');
+  const iosHint = document.getElementById('iosHint');
+  let deferredPrompt = null;
+
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    // Chrome/Edge/Android: capture the event and offer our own button.
+    e.preventDefault();
+    deferredPrompt = e;
+    if (!isStandalone) installBtn.style.display = 'inline-block';
+  });
+
+  installBtn.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    try { await deferredPrompt.userChoice; } catch (e) {}
+    deferredPrompt = null;
+    installBtn.style.display = 'none';
+  });
+
+  window.addEventListener('appinstalled', () => {
+    installBtn.style.display = 'none';
+    deferredPrompt = null;
+  });
+
+  // iOS has no install prompt API — show the Add-to-Home-Screen hint instead.
+  if (isIOS && !isStandalone) iosHint.style.display = 'block';
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
 
   // ---------- Init ----------
   loadSettings();
