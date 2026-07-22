@@ -65,12 +65,16 @@ html, body {
 }
 #gate.hot .label { color: var(--warn); }
 #gate .handle {
-  position: absolute; width: 26px; height: 26px;
-  right: -13px; bottom: -13px;
+  position: absolute; width: 30px; height: 30px;
   background: var(--accent); border-radius: 50%;
   border: 2px solid #04120d;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
   touch-action: none;
 }
+#gate .handle.tl { left: -15px; top: -15px; }
+#gate .handle.tr { right: -15px; top: -15px; }
+#gate .handle.bl { left: -15px; bottom: -15px; }
+#gate .handle.br { right: -15px; bottom: -15px; }
 #gate.hot .handle { background: var(--warn); }
 #gate.locked .handle { display: none; }
 #gate.locked { cursor: default; }
@@ -208,7 +212,10 @@ select {
   <div id="gate">
     <div class="label">START / FINISH GATE</div>
     <div id="activityWrap"><div id="activityBar"></div><div id="threshMark"></div></div>
-    <div class="handle"></div>
+    <div class="handle tl" data-corner="tl"></div>
+    <div class="handle tr" data-corner="tr"></div>
+    <div class="handle bl" data-corner="bl"></div>
+    <div class="handle br" data-corner="br"></div>
   </div>
 </div>
 
@@ -817,40 +824,69 @@ select {
   voiceSel.addEventListener('change', saveSettings);
 
   // ---------- Drag / resize gate ----------
+  const MIN_GATE = 50; // px
   let drag = null;
-  const handle = gate.querySelector('.handle');
+  const handles = Array.from(gate.querySelectorAll('.handle'));
   function pt(e) { return e.touches ? e.touches[0] : e; }
+  function stageRect() { return document.getElementById('stage').getBoundingClientRect(); }
 
-  function startDrag(e, mode) {
+  // Drag the body to move the whole box.
+  function startMove(e) {
     if (lockGateTog.checked) return;
     e.preventDefault();
-    const p = pt(e);
-    const r = gate.getBoundingClientRect();
-    const stage = document.getElementById('stage').getBoundingClientRect();
-    drag = { mode, sx: p.clientX, sy: p.clientY, left: r.left - stage.left, top: r.top - stage.top, w: r.width, h: r.height, stage };
+    const p = pt(e), r = gate.getBoundingClientRect(), s = stageRect();
+    drag = { mode: 'move', sx: p.clientX, sy: p.clientY, left: r.left - s.left, top: r.top - s.top, w: r.width, h: r.height, stage: s };
   }
+
+  // Drag any corner to resize, anchoring the opposite corner in place.
+  function startResize(e, corner) {
+    if (lockGateTog.checked) return;
+    e.preventDefault(); e.stopPropagation();
+    const p = pt(e), r = gate.getBoundingClientRect(), s = stageRect();
+    const l = r.left - s.left, t = r.top - s.top, rt = l + r.width, bt = t + r.height;
+    let ax, ay; // anchor = the corner that stays fixed
+    if (corner === 'br') { ax = l;  ay = t;  }
+    else if (corner === 'tl') { ax = rt; ay = bt; }
+    else if (corner === 'tr') { ax = l;  ay = bt; }
+    else { ax = rt; ay = t; } // bl
+    drag = { mode: 'resize', ax, ay, stage: s };
+  }
+
   function moveDrag(e) {
     if (!drag) return;
     e.preventDefault();
-    const p = pt(e);
-    const dx = p.clientX - drag.sx, dy = p.clientY - drag.sy;
-    const s = drag.stage;
+    const p = pt(e), s = drag.stage;
     if (drag.mode === 'move') {
-      let nl = Math.max(0, Math.min(s.width - drag.w, drag.left + dx));
-      let nt = Math.max(0, Math.min(s.height - drag.h, drag.top + dy));
+      const dx = p.clientX - drag.sx, dy = p.clientY - drag.sy;
+      const nl = Math.max(0, Math.min(s.width - drag.w, drag.left + dx));
+      const nt = Math.max(0, Math.min(s.height - drag.h, drag.top + dy));
       gate.style.left = nl + 'px'; gate.style.top = nt + 'px';
     } else {
-      let nw = Math.max(60, Math.min(s.width - drag.left, drag.w + dx));
-      let nh = Math.max(60, Math.min(s.height - drag.top, drag.h + dy));
-      gate.style.width = nw + 'px'; gate.style.height = nh + 'px';
+      const mx = Math.max(0, Math.min(s.width, p.clientX - s.left));
+      const my = Math.max(0, Math.min(s.height, p.clientY - s.top));
+      const ax = drag.ax, ay = drag.ay;
+      let w = Math.max(MIN_GATE, Math.abs(mx - ax));
+      let h = Math.max(MIN_GATE, Math.abs(my - ay));
+      let left = mx < ax ? ax - w : ax;
+      let top  = my < ay ? ay - h : ay;
+      if (left < 0) { w += left; left = 0; }
+      if (top  < 0) { h += top;  top = 0; }
+      if (left + w > s.width)  w = s.width  - left;
+      if (top  + h > s.height) h = s.height - top;
+      w = Math.max(MIN_GATE, w); h = Math.max(MIN_GATE, h);
+      gate.style.left = left + 'px'; gate.style.top = top + 'px';
+      gate.style.width = w + 'px'; gate.style.height = h + 'px';
     }
   }
   function endDrag() { if (drag) { drag = null; saveSettings(); } }
 
-  gate.addEventListener('mousedown', e => { if (e.target !== handle) startDrag(e, 'move'); });
-  gate.addEventListener('touchstart', e => { if (e.target !== handle) startDrag(e, 'move'); }, { passive: false });
-  handle.addEventListener('mousedown', e => startDrag(e, 'resize'));
-  handle.addEventListener('touchstart', e => startDrag(e, 'resize'), { passive: false });
+  gate.addEventListener('mousedown', e => { if (!e.target.classList.contains('handle')) startMove(e); });
+  gate.addEventListener('touchstart', e => { if (!e.target.classList.contains('handle')) startMove(e); }, { passive: false });
+  handles.forEach(h => {
+    const c = h.dataset.corner;
+    h.addEventListener('mousedown', e => startResize(e, c));
+    h.addEventListener('touchstart', e => startResize(e, c), { passive: false });
+  });
   window.addEventListener('mousemove', moveDrag);
   window.addEventListener('touchmove', moveDrag, { passive: false });
   window.addEventListener('mouseup', endDrag);
