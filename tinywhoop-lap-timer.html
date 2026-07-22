@@ -248,7 +248,7 @@ select {
 
     <div class="row">
       <label>Sensitivity — % of the gate that must change as the whoop passes; <b>lower = more sensitive</b> (<span class="val" id="sensVal"></span>%)</label>
-      <input type="range" id="sens" min="0.5" max="25" step="0.5" value="2">
+      <input type="range" id="sens" min="0.5" max="25" step="0.5" value="1">
     </div>
 
     <div class="row">
@@ -355,7 +355,7 @@ select {
   // between frames. Detection then triggers on the PERCENT of the gate area
   // that is moving — this catches a small/fast whoop far better than averaging
   // the change across the whole box (which needed the whoop to nearly fill it).
-  const PIX_DELTA = 22;   // 0..255 per-pixel change to count as motion
+  const PIX_DELTA = 16;   // 0..255 per-pixel change to count as motion
   const ACT_FULL  = 25;   // % motion that fills the activity bar / slider top
 
   // ---------- State ----------
@@ -368,7 +368,7 @@ select {
     lapStart: 0,             // when current lap started
     laps: [],                // completed lap durations (ms)
     best: Infinity,
-    sensitivity: 2,          // % of gate area that must change to trigger
+    sensitivity: 1,          // % of gate area that must change to trigger
     lockout: 1200,           // ms lockout after a pass
     activity: 0,             // smoothed current activity (% moving)
     settings: {},
@@ -381,7 +381,7 @@ select {
     try { s = JSON.parse(localStorage.getItem(SKEY) || '{}'); } catch (e) {}
     // Ignore values saved under the old (mean-diff) scale, which used a much
     // larger range; anything outside the new slider range falls back to default.
-    sens.value = (s.sensitivity != null && s.sensitivity >= 0.5 && s.sensitivity <= 25) ? s.sensitivity : 2;
+    sens.value = (s.sensitivity != null && s.sensitivity >= 0.5 && s.sensitivity <= 25) ? s.sensitivity : 1;
     lock.value = s.lockout != null ? s.lockout : 1200;
     rate.value = s.rate != null ? s.rate : 1.0;
     speakTog.checked = s.speak !== false;
