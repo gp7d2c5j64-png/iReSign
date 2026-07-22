@@ -1,6 +1,6 @@
 /* TinyWhoop Lap RF — service worker for offline / installable PWA.
    Bump CACHE when any cached file changes so clients pick up the update. */
-const CACHE = 'twlap-v1';
+const CACHE = 'twlap-v2';
 const ASSETS = [
   './tinywhoop-lap-timer.html',
   './manifest.webmanifest',
