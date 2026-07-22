@@ -14,6 +14,28 @@ iReSign allows you to re-sign any unencrypted ipa-file with any certificate for 
 
 3. Click ReSign! and wait. The resigned file will be saved in the same folder as the original file.
 
+TinyWhoop Lap RF (camera gate timer)
+=======
+
+`tinywhoop-lap-timer.html` is a standalone, single-file web app that turns any
+phone or webcam into a lap timer for tiny whoop / FPV drone racing.
+
+1. Open the file in a browser (over HTTPS, or `localhost`) and tap **Enable
+   Camera** — the app asks for camera permission. All video stays on-device;
+   nothing is recorded or uploaded.
+
+2. Drag/resize the on-screen box so it frames your gate (the start/finish).
+
+3. Tap **Arm Timer** and fly. Each time the whoop passes through the box it
+   counts as one lap — the first pass starts the clock, every pass after that
+   closes a lap. A voice reads each lap time aloud using the browser's built-in
+   speech synthesis, and completed laps (with your best highlighted) are listed
+   on screen.
+
+Settings let you tune detection sensitivity and the lockout between passes,
+pick the announcement voice and speed, toggle beeps, lock the gate, and switch
+between the front and rear camera.
+
 License
 =======
 

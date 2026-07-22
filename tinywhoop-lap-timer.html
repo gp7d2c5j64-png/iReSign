@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>TinyWhoop Lap RF — Camera Gate Timer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #070a0e;
+  --panel: rgba(14, 19, 26, 0.86);
+  --accent: #19e3b1;
+  --accent2: #37b6ff;
+  --warn: #ff5b6e;
+  --text: #e9edf3;
+  --muted: #8b97a8;
+}
+html, body {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Rajdhani', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#stage { position: fixed; inset: 0; overflow: hidden; background: #000; }
+#video {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+#video.mirror { transform: scaleX(-1); }
+#work { display: none; }
+
+/* Gate overlay box */
+#gate {
+  position: absolute;
+  border: 3px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 24px rgba(25,227,177,0.35);
+  left: 30%; top: 30%; width: 40%; height: 40%;
+  touch-action: none;
+  z-index: 5;
+}
+#gate.hot { border-color: var(--warn); box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 34px rgba(255,91,110,0.6); }
+#gate .label {
+  position: absolute; top: -26px; left: 0;
+  font-size: 13px; font-weight: 700; letter-spacing: 1px;
+  color: var(--accent); text-shadow: 0 1px 3px #000;
+}
+#gate.hot .label { color: var(--warn); }
+#gate .handle {
+  position: absolute; width: 26px; height: 26px;
+  right: -13px; bottom: -13px;
+  background: var(--accent); border-radius: 50%;
+  border: 2px solid #04120d;
+  touch-action: none;
+}
+#gate.hot .handle { background: var(--warn); }
+#gate.locked .handle { display: none; }
+#gate.locked { cursor: default; }
+
+/* Live activity bar inside gate */
+#activityWrap {
+  position: absolute; left: 6px; right: 6px; bottom: 6px; height: 6px;
+  background: rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden;
+}
+#activityBar { height: 100%; width: 0%; background: var(--accent); transition: width 0.05s linear; }
+#threshMark { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; opacity: 0.85; }
+
+/* Top HUD */
+#hud {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  display: flex; gap: 10px; padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+  align-items: stretch; pointer-events: none;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 8px 12px;
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+#lapNow { flex: 1; text-align: center; }
+#lapNow .big { font-size: clamp(30px, 11vw, 58px); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; color: var(--accent); }
+#lapNow .sub { font-size: 12px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; }
+#counts { text-align: center; min-width: 74px; display: flex; flex-direction: column; justify-content: center; }
+#counts .n { font-size: 30px; font-weight: 700; }
+#counts .l { font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+
+/* Lap list */
+#laps {
+  position: fixed; z-index: 10;
+  left: 12px; bottom: max(96px, calc(env(safe-area-inset-bottom) + 96px));
+  width: min(240px, 60vw);
+  max-height: 42vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px; padding: 6px; backdrop-filter: blur(8px);
+  display: none;
+}
+#laps.show { display: block; }
+.laprow { display: flex; justify-content: space-between; padding: 5px 8px; border-radius: 7px; font-variant-numeric: tabular-nums; font-size: 15px; }
+.laprow:nth-child(odd) { background: rgba(255,255,255,0.03); }
+.laprow.best { background: rgba(25,227,177,0.16); color: var(--accent); font-weight: 700; }
+.laprow .ln { color: var(--muted); }
+.laprow.best .ln { color: var(--accent); }
+
+/* Bottom controls */
+#controls {
+  position: fixed; z-index: 10; left: 0; right: 0;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  display: flex; gap: 10px; padding: 0 12px; align-items: center; justify-content: center;
+}
+.btn {
+  flex: 0 0 auto;
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text);
+  border-radius: 14px; padding: 14px 18px;
+  font-size: 15px; font-weight: 700; letter-spacing: 0.5px;
+  backdrop-filter: blur(8px); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active { transform: scale(0.96); }
+.btn.primary { background: var(--accent); color: #04120d; border-color: var(--accent); flex: 1; max-width: 220px; }
+.btn.primary.running { background: var(--warn); color: #200; border-color: var(--warn); }
+.btn.icon { width: 54px; height: 54px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+
+/* Settings panel */
+#settings {
+  position: fixed; z-index: 20; inset: 0;
+  background: rgba(4,7,10,0.72); backdrop-filter: blur(4px);
+  display: none; align-items: center; justify-content: center; padding: 18px;
+}
+#settings.show { display: flex; }
+#settingsBox {
+  width: min(420px, 100%); max-height: 86vh; overflow-y: auto;
+  background: #0d131a; border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px; padding: 18px;
+}
+#settingsBox h2 { font-size: 18px; margin-bottom: 14px; letter-spacing: 1px; }
+.row { margin: 14px 0; }
+.row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.5px; }
+.row .val { color: var(--accent); font-weight: 700; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+select {
+  width: 100%; background: #0a0f15; color: var(--text);
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 10px; font-size: 15px;
+}
+.toggle { display: flex; align-items: center; justify-content: space-between; }
+.switch { position: relative; width: 50px; height: 28px; }
+.switch input { display: none; }
+.switch span { position: absolute; inset: 0; background: #2a333f; border-radius: 20px; transition: 0.2s; }
+.switch span::before { content: ''; position: absolute; width: 22px; height: 22px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::before { transform: translateX(22px); }
+
+/* Permission / start screen */
+#perm {
+  position: fixed; inset: 0; z-index: 40;
+  background: radial-gradient(circle at 50% 30%, #10202a, #05080b 70%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: 28px; gap: 18px;
+}
+#perm.hidden { display: none; }
+#perm h1 { font-size: clamp(26px, 8vw, 40px); font-weight: 700; letter-spacing: 1px; }
+#perm h1 span { color: var(--accent); }
+#perm p { color: var(--muted); max-width: 360px; line-height: 1.5; font-size: 15px; }
+#perm .icon { font-size: 60px; }
+#permBtn {
+  margin-top: 6px; background: var(--accent); color: #04120d;
+  border: none; border-radius: 16px; padding: 16px 30px;
+  font-size: 18px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+}
+#permBtn:active { transform: scale(0.97); }
+#permErr { color: var(--warn); font-size: 14px; min-height: 18px; }
+
+/* Flash on lap */
+#flash {
+  position: fixed; inset: 0; z-index: 30; pointer-events: none;
+  background: var(--accent); opacity: 0; transition: opacity 0.35s ease-out;
+}
+.hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 6px; letter-spacing: 0.5px; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="work" width="192" height="144"></canvas>
+
+  <div id="gate">
+    <div class="label">START / FINISH GATE</div>
+    <div id="activityWrap"><div id="activityBar"></div><div id="threshMark"></div></div>
+    <div class="handle"></div>
+  </div>
+</div>
+
+<div id="flash"></div>
+
+<!-- Top HUD -->
+<div id="hud">
+  <div class="card" id="counts">
+    <div class="n" id="lapCount">0</div>
+    <div class="l">LAPS</div>
+  </div>
+  <div class="card" id="lapNow">
+    <div class="big" id="curTime">0.00</div>
+    <div class="sub" id="curSub">Waiting to arm</div>
+  </div>
+  <div class="card" id="counts">
+    <div class="n" id="bestTime">—</div>
+    <div class="l">BEST</div>
+  </div>
+</div>
+
+<!-- Lap list -->
+<div id="laps"></div>
+
+<!-- Bottom controls -->
+<div id="controls">
+  <button class="btn icon" id="listBtn" title="Toggle lap list">☰</button>
+  <button class="btn primary" id="armBtn">ARM TIMER</button>
+  <button class="btn icon" id="resetBtn" title="Reset">↺</button>
+  <button class="btn icon" id="setBtn" title="Settings">⚙</button>
+</div>
+
+<!-- Settings -->
+<div id="settings">
+  <div id="settingsBox">
+    <h2>SETTINGS</h2>
+
+    <div class="row">
+      <label>Sensitivity — how big a change in the gate counts as a whoop passing (<span class="val" id="sensVal"></span>)</label>
+      <input type="range" id="sens" min="4" max="120" step="1">
+    </div>
+
+    <div class="row">
+      <label>Lap lockout — ignore new detections for this long after a pass (<span class="val" id="lockVal"></span> ms)</label>
+      <input type="range" id="lock" min="300" max="4000" step="50">
+    </div>
+
+    <div class="row">
+      <label>Announcement voice</label>
+      <select id="voiceSel"></select>
+    </div>
+
+    <div class="row">
+      <label>Voice speed (<span class="val" id="rateVal"></span>×)</label>
+      <input type="range" id="rate" min="0.6" max="1.6" step="0.05">
+    </div>
+
+    <div class="row toggle">
+      <label style="margin:0">Speak lap times aloud</label>
+      <label class="switch"><input type="checkbox" id="speakTog" checked><span></span></label>
+    </div>
+
+    <div class="row toggle">
+      <label style="margin:0">Beep on each pass</label>
+      <label class="switch"><input type="checkbox" id="beepTog" checked><span></span></label>
+    </div>
+
+    <div class="row toggle">
+      <label style="margin:0">Lock gate (prevent moving it)</label>
+      <label class="switch"><input type="checkbox" id="lockGateTog"><span></span></label>
+    </div>
+
+    <div class="row toggle">
+      <label style="margin:0">Use front camera</label>
+      <label class="switch"><input type="checkbox" id="frontTog"><span></span></label>
+    </div>
+
+    <button class="btn primary" id="testVoiceBtn" style="width:100%;max-width:none;margin-top:6px">TEST VOICE</button>
+    <button class="btn" id="closeSet" style="width:100%;margin-top:10px">DONE</button>
+  </div>
+</div>
+
+<!-- Permission gate -->
+<div id="perm">
+  <div class="icon">🚁</div>
+  <h1>TinyWhoop <span>Lap RF</span></h1>
+  <p>Point your phone or webcam at a gate. Each time your whoop flies through the box on screen, it counts one lap — and a voice calls out your time.</p>
+  <p style="font-size:13px">This app needs your <b>camera</b> to see the gate. Nothing is recorded or uploaded — all detection runs on your device.</p>
+  <button id="permBtn">ENABLE CAMERA</button>
+  <div id="permErr"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------- Elements ----------
+  const video = document.getElementById('video');
+  const work = document.getElementById('work');
+  const wctx = work.getContext('2d', { willReadFrequently: true });
+  const gate = document.getElementById('gate');
+  const gateLabel = gate.querySelector('.label');
+  const activityBar = document.getElementById('activityBar');
+  const threshMark = document.getElementById('threshMark');
+  const flash = document.getElementById('flash');
+
+  const curTimeEl = document.getElementById('curTime');
+  const curSubEl = document.getElementById('curSub');
+  const lapCountEl = document.getElementById('lapCount');
+  const bestTimeEl = document.getElementById('bestTime');
+  const lapsEl = document.getElementById('laps');
+
+  const armBtn = document.getElementById('armBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const setBtn = document.getElementById('setBtn');
+  const listBtn = document.getElementById('listBtn');
+
+  const settings = document.getElementById('settings');
+  const closeSet = document.getElementById('closeSet');
+  const perm = document.getElementById('perm');
+  const permBtn = document.getElementById('permBtn');
+  const permErr = document.getElementById('permErr');
+
+  const sens = document.getElementById('sens'), sensVal = document.getElementById('sensVal');
+  const lock = document.getElementById('lock'), lockVal = document.getElementById('lockVal');
+  const rate = document.getElementById('rate'), rateVal = document.getElementById('rateVal');
+  const voiceSel = document.getElementById('voiceSel');
+  const speakTog = document.getElementById('speakTog');
+  const beepTog = document.getElementById('beepTog');
+  const lockGateTog = document.getElementById('lockGateTog');
+  const frontTog = document.getElementById('frontTog');
+  const testVoiceBtn = document.getElementById('testVoiceBtn');
+
+  // ---------- State ----------
+  const state = {
+    running: false,
+    stream: null,
+    facing: 'environment',
+    prevGray: null,          // previous frame's gate pixels (grayscale)
+    lastCross: 0,            // timestamp of last counted pass
+    lapStart: 0,             // when current lap started
+    laps: [],                // completed lap durations (ms)
+    best: Infinity,
+    sensitivity: 26,         // mean-abs-diff threshold
+    lockout: 1200,           // ms lockout after a pass
+    activity: 0,             // smoothed current activity
+    settings: {},
+  };
+
+  // ---------- Persistence ----------
+  const SKEY = 'twlap_settings_v1';
+  function loadSettings() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem(SKEY) || '{}'); } catch (e) {}
+    sens.value = s.sensitivity != null ? s.sensitivity : 26;
+    lock.value = s.lockout != null ? s.lockout : 1200;
+    rate.value = s.rate != null ? s.rate : 1.0;
+    speakTog.checked = s.speak !== false;
+    beepTog.checked = s.beep !== false;
+    lockGateTog.checked = !!s.lockGate;
+    frontTog.checked = !!s.front;
+    if (s.gate) {
+      gate.style.left = s.gate.left; gate.style.top = s.gate.top;
+      gate.style.width = s.gate.width; gate.style.height = s.gate.height;
+    }
+    state.savedVoice = s.voice || '';
+    applySettings();
+  }
+  function saveSettings() {
+    const s = {
+      sensitivity: +sens.value, lockout: +lock.value, rate: +rate.value,
+      speak: speakTog.checked, beep: beepTog.checked,
+      lockGate: lockGateTog.checked, front: frontTog.checked,
+      voice: voiceSel.value,
+      gate: { left: gate.style.left, top: gate.style.top, width: gate.style.width, height: gate.style.height },
+    };
+    try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch (e) {}
+  }
+  function applySettings() {
+    state.sensitivity = +sens.value;
+    state.lockout = +lock.value;
+    sensVal.textContent = sens.value;
+    lockVal.textContent = lock.value;
+    rateVal.textContent = (+rate.value).toFixed(2);
+    threshMark.style.left = Math.min(100, (state.sensitivity / 120) * 100) + '%';
+    video.classList.toggle('mirror', frontTog.checked);
+    gate.classList.toggle('locked', lockGateTog.checked);
+  }
+
+  // ---------- Camera ----------
+  async function startCamera(facing) {
+    if (state.stream) { state.stream.getTracks().forEach(t => t.stop()); state.stream = null; }
+    const constraints = {
+      audio: false,
+      video: {
+        facingMode: { ideal: facing },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    state.stream = stream;
+    state.facing = facing;
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+  }
+
+  permBtn.addEventListener('click', async () => {
+    permErr.textContent = '';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      permErr.textContent = 'This browser has no camera API. Try Chrome or Safari over HTTPS.';
+      return;
+    }
+    permBtn.textContent = 'REQUESTING…';
+    try {
+      await startCamera(frontTog.checked ? 'user' : 'environment');
+      perm.classList.add('hidden');
+      // Prime the speech engine (needs a user gesture on iOS).
+      primeVoice();
+      requestAnimationFrame(loop);
+    } catch (err) {
+      permBtn.textContent = 'ENABLE CAMERA';
+      if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+        permErr.textContent = 'Camera permission was denied. Allow it in your browser settings, then reload.';
+      } else if (err && err.name === 'NotFoundError') {
+        permErr.textContent = 'No camera found on this device.';
+      } else {
+        permErr.textContent = 'Could not start camera: ' + (err && err.message ? err.message : err);
+      }
+    }
+  });
+
+  frontTog.addEventListener('change', async () => {
+    saveSettings(); applySettings();
+    if (state.stream) {
+      try { await startCamera(frontTog.checked ? 'user' : 'environment'); }
+      catch (e) { /* keep old stream */ }
+    }
+  });
+
+  // ---------- Gate geometry mapping ----------
+  // Map the on-screen gate box to a region of the video frame, accounting for
+  // object-fit: cover (video is scaled to fill and cropped).
+  function gateRegion() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const stage = document.getElementById('stage').getBoundingClientRect();
+    const scale = Math.max(stage.width / vw, stage.height / vh); // cover
+    const dispW = vw * scale, dispH = vh * scale;
+    const offX = (stage.width - dispW) / 2, offY = (stage.height - dispH) / 2;
+
+    const g = gate.getBoundingClientRect();
+    // gate position relative to stage
+    let gx = g.left - stage.left, gy = g.top - stage.top;
+    // to video pixel space
+    let vx = (gx - offX) / scale;
+    let vy = (gy - offY) / scale;
+    let vwid = g.width / scale;
+    let vhei = g.height / scale;
+    // clamp
+    vx = Math.max(0, Math.min(vw - 1, vx));
+    vy = Math.max(0, Math.min(vh - 1, vy));
+    vwid = Math.max(1, Math.min(vw - vx, vwid));
+    vhei = Math.max(1, Math.min(vh - vy, vhei));
+    return { vx, vy, vwid, vhei, vw, vh };
+  }
+
+  // ---------- Detection loop ----------
+  const SAMPLE_W = work.width, SAMPLE_H = work.height;
+  let lastActivityDraw = 0;
+
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    if (video.readyState < 2) return;
+
+    const reg = gateRegion();
+    if (!reg) return;
+
+    // Draw just the gate region of the video into the small work canvas.
+    try {
+      wctx.drawImage(video, reg.vx, reg.vy, reg.vwid, reg.vhei, 0, 0, SAMPLE_W, SAMPLE_H);
+    } catch (e) { return; }
+
+    const img = wctx.getImageData(0, 0, SAMPLE_W, SAMPLE_H).data;
+    const n = SAMPLE_W * SAMPLE_H;
+    const gray = state.grayBuf || (state.grayBuf = new Uint8ClampedArray(n));
+    for (let i = 0, j = 0; i < img.length; i += 4, j++) {
+      // fast luma
+      gray[j] = (img[i] * 77 + img[i + 1] * 150 + img[i + 2] * 29) >> 8;
+    }
+
+    let diff = 0;
+    if (state.prevGray) {
+      const prev = state.prevGray;
+      let sum = 0;
+      for (let j = 0; j < n; j++) {
+        const d = gray[j] - prev[j];
+        sum += d < 0 ? -d : d;
+      }
+      diff = sum / n; // mean absolute difference 0..255
+    }
+    // store current as prev (swap buffers)
+    if (!state.prevGray) state.prevGray = new Uint8ClampedArray(n);
+    state.prevGray.set(gray);
+
+    // Smooth the activity a touch for a stable bar.
+    state.activity = state.activity * 0.5 + diff * 0.5;
+
+    // Update activity bar occasionally.
+    if (ts - lastActivityDraw > 40) {
+      lastActivityDraw = ts;
+      const pct = Math.min(100, (state.activity / 120) * 100);
+      activityBar.style.width = pct + '%';
+      const hot = state.activity >= state.sensitivity;
+      activityBar.style.background = hot ? 'var(--warn)' : 'var(--accent)';
+    }
+
+    // Detection.
+    if (state.running && diff >= state.sensitivity) {
+      const now = performance.now();
+      if (now - state.lastCross >= state.lockout) {
+        registerCross(now);
+        state.lastCross = now;
+        gate.classList.add('hot');
+        setTimeout(() => gate.classList.remove('hot'), 250);
+      }
+    }
+
+    // Live current-lap time.
+    if (state.running && state.lapStart) {
+      curTimeEl.textContent = ((performance.now() - state.lapStart) / 1000).toFixed(2);
+    }
+  }
+
+  // ---------- Lap counting ----------
+  function registerCross(now) {
+    if (!state.lapStart) {
+      // First pass = start of lap 1.
+      state.lapStart = now;
+      curSubEl.textContent = 'Lap 1 — flying';
+      flashScreen();
+      beep(880, 90);
+      speak('Go');
+      return;
+    }
+    // Complete a lap.
+    const dur = now - state.lapStart;
+    state.lapStart = now;
+    state.laps.push(dur);
+    const lapNum = state.laps.length;
+    if (dur < state.best) state.best = dur;
+
+    renderLaps();
+    flashScreen();
+    beep(1245, 110);
+
+    curSubEl.textContent = 'Lap ' + (lapNum + 1) + ' — flying';
+    announceLap(lapNum, dur, dur <= state.best);
+  }
+
+  function renderLaps() {
+    lapCountEl.textContent = state.laps.length;
+    bestTimeEl.textContent = state.best === Infinity ? '—' : (state.best / 1000).toFixed(2);
+    let html = '';
+    for (let i = state.laps.length - 1; i >= 0; i--) {
+      const isBest = state.laps[i] === state.best;
+      html += '<div class="laprow' + (isBest ? ' best' : '') + '">' +
+              '<span class="ln">LAP ' + (i + 1) + '</span>' +
+              '<span>' + (state.laps[i] / 1000).toFixed(2) + 's</span></div>';
+    }
+    lapsEl.innerHTML = html || '<div class="laprow"><span class="ln">No laps yet</span></div>';
+  }
+
+  // ---------- Voice ----------
+  let voices = [];
+  function refreshVoices() {
+    voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
+    const prev = voiceSel.value || state.savedVoice;
+    voiceSel.innerHTML = '';
+    if (!voices.length) {
+      const o = document.createElement('option');
+      o.value = ''; o.textContent = 'Default system voice';
+      voiceSel.appendChild(o);
+      return;
+    }
+    // Prefer English voices at top.
+    const sorted = voices.slice().sort((a, b) => {
+      const ae = a.lang.startsWith('en') ? 0 : 1, be = b.lang.startsWith('en') ? 0 : 1;
+      return ae - be || a.name.localeCompare(b.name);
+    });
+    sorted.forEach(v => {
+      const o = document.createElement('option');
+      o.value = v.name;
+      o.textContent = v.name + ' (' + v.lang + ')';
+      voiceSel.appendChild(o);
+    });
+    // Restore or pick a sensible natural default.
+    if (prev && sorted.some(v => v.name === prev)) {
+      voiceSel.value = prev;
+    } else {
+      const pref = sorted.find(v => /natural|neural|google|samantha|siri|zira|aria/i.test(v.name) && v.lang.startsWith('en'))
+                || sorted.find(v => v.lang.startsWith('en'))
+                || sorted[0];
+      if (pref) voiceSel.value = pref.name;
+    }
+  }
+  if (window.speechSynthesis) {
+    refreshVoices();
+    window.speechSynthesis.onvoiceschanged = refreshVoices;
+  }
+  function primeVoice() {
+    if (!window.speechSynthesis) return;
+    // Silent priming utterance to unlock the engine on a user gesture.
+    try {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+    refreshVoices();
+  }
+  function speak(text) {
+    if (!speakTog.checked || !window.speechSynthesis) return;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = +rate.value;
+      u.pitch = 1.0;
+      const v = voices.find(vv => vv.name === voiceSel.value);
+      if (v) u.voice = v;
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+  function announceLap(lapNum, ms, isBest) {
+    const secs = ms / 1000;
+    // Read as a natural spoken time, e.g. "Lap 3, 14.2 seconds. New best!"
+    let spoken;
+    if (secs < 60) {
+      spoken = 'Lap ' + lapNum + '. ' + secs.toFixed(1).replace('.', ' point ') + ' seconds';
+    } else {
+      const m = Math.floor(secs / 60), s = secs - m * 60;
+      spoken = 'Lap ' + lapNum + '. ' + m + ' minute' + (m > 1 ? 's' : '') + ' ' +
+               s.toFixed(1).replace('.', ' point ') + ' seconds';
+    }
+    if (isBest && state.laps.length > 1) spoken += '. New best';
+    speak(spoken);
+  }
+
+  // ---------- Sound ----------
+  let audioCtx = null;
+  function beep(freq, dur) {
+    if (!beepTog.checked) return;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'triangle'; o.frequency.value = freq;
+      g.gain.value = 0.0001;
+      o.connect(g); g.connect(audioCtx.destination);
+      const t = audioCtx.currentTime;
+      g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur / 1000);
+      o.start(t); o.stop(t + dur / 1000 + 0.02);
+    } catch (e) {}
+  }
+  function flashScreen() {
+    flash.style.opacity = '0.5';
+    setTimeout(() => { flash.style.opacity = '0'; }, 40);
+  }
+
+  // ---------- Controls ----------
+  function arm() {
+    state.running = true;
+    state.lastCross = 0;
+    state.lapStart = 0;
+    state.prevGray = null; // reset baseline so the first frame isn't a false trigger
+    armBtn.textContent = 'STOP';
+    armBtn.classList.add('running');
+    curSubEl.textContent = 'Armed — fly through the gate';
+    curTimeEl.textContent = '0.00';
+    gateLabel.textContent = 'ARMED — START / FINISH';
+    speak('Timer armed');
+  }
+  function stop() {
+    state.running = false;
+    armBtn.textContent = 'ARM TIMER';
+    armBtn.classList.remove('running');
+    curSubEl.textContent = 'Stopped';
+    gateLabel.textContent = 'START / FINISH GATE';
+    speak('Timer stopped');
+  }
+  armBtn.addEventListener('click', () => { state.running ? stop() : arm(); });
+
+  resetBtn.addEventListener('click', () => {
+    state.laps = []; state.best = Infinity; state.lapStart = 0; state.lastCross = 0;
+    curTimeEl.textContent = '0.00';
+    curSubEl.textContent = state.running ? 'Armed — fly through the gate' : 'Waiting to arm';
+    renderLaps();
+    speak('Laps cleared');
+  });
+
+  listBtn.addEventListener('click', () => { lapsEl.classList.toggle('show'); if (lapsEl.classList.contains('show')) renderLaps(); });
+
+  setBtn.addEventListener('click', () => settings.classList.add('show'));
+  closeSet.addEventListener('click', () => { settings.classList.remove('show'); saveSettings(); });
+  testVoiceBtn.addEventListener('click', () => { primeVoice(); speak('Lap 3. 12 point 4 seconds. New best'); });
+
+  [sens, lock, rate].forEach(el => el.addEventListener('input', () => { applySettings(); }));
+  [sens, lock, rate].forEach(el => el.addEventListener('change', saveSettings));
+  [speakTog, beepTog, lockGateTog].forEach(el => el.addEventListener('change', () => { applySettings(); saveSettings(); }));
+  voiceSel.addEventListener('change', saveSettings);
+
+  // ---------- Drag / resize gate ----------
+  let drag = null;
+  const handle = gate.querySelector('.handle');
+  function pt(e) { return e.touches ? e.touches[0] : e; }
+
+  function startDrag(e, mode) {
+    if (lockGateTog.checked) return;
+    e.preventDefault();
+    const p = pt(e);
+    const r = gate.getBoundingClientRect();
+    const stage = document.getElementById('stage').getBoundingClientRect();
+    drag = { mode, sx: p.clientX, sy: p.clientY, left: r.left - stage.left, top: r.top - stage.top, w: r.width, h: r.height, stage };
+  }
+  function moveDrag(e) {
+    if (!drag) return;
+    e.preventDefault();
+    const p = pt(e);
+    const dx = p.clientX - drag.sx, dy = p.clientY - drag.sy;
+    const s = drag.stage;
+    if (drag.mode === 'move') {
+      let nl = Math.max(0, Math.min(s.width - drag.w, drag.left + dx));
+      let nt = Math.max(0, Math.min(s.height - drag.h, drag.top + dy));
+      gate.style.left = nl + 'px'; gate.style.top = nt + 'px';
+    } else {
+      let nw = Math.max(60, Math.min(s.width - drag.left, drag.w + dx));
+      let nh = Math.max(60, Math.min(s.height - drag.top, drag.h + dy));
+      gate.style.width = nw + 'px'; gate.style.height = nh + 'px';
+    }
+  }
+  function endDrag() { if (drag) { drag = null; saveSettings(); } }
+
+  gate.addEventListener('mousedown', e => { if (e.target !== handle) startDrag(e, 'move'); });
+  gate.addEventListener('touchstart', e => { if (e.target !== handle) startDrag(e, 'move'); }, { passive: false });
+  handle.addEventListener('mousedown', e => startDrag(e, 'resize'));
+  handle.addEventListener('touchstart', e => startDrag(e, 'resize'), { passive: false });
+  window.addEventListener('mousemove', moveDrag);
+  window.addEventListener('touchmove', moveDrag, { passive: false });
+  window.addEventListener('mouseup', endDrag);
+  window.addEventListener('touchend', endDrag);
+
+  // ---------- Init ----------
+  loadSettings();
+  renderLaps();
+
+  // Keep sample-region math correct after orientation changes.
+  window.addEventListener('resize', () => { state.prevGray = null; });
+})();
+</script>
+</body>
+</html>
