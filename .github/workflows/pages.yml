@@ -1,0 +1,44 @@
+name: Deploy to GitHub Pages
+
+# Publishes the repo (including tinywhoop-lap-timer.html) to GitHub Pages so it
+# is served over HTTPS, which the camera API requires.
+on:
+  push:
+    branches:
+      - claude/tinywhoop-lap-rf-counter-apgsh5
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages (enables Pages if not already on)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
