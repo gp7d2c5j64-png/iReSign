@@ -277,6 +277,11 @@ select {
     </div>
 
     <div class="row toggle">
+      <label style="margin:0">Race start sequence — “Arm your whoops…” then a random start tone (under 5s)</label>
+      <label class="switch"><input type="checkbox" id="startSeqTog"><span></span></label>
+    </div>
+
+    <div class="row toggle">
       <label style="margin:0">Lock gate (prevent moving it)</label>
       <label class="switch"><input type="checkbox" id="lockGateTog"><span></span></label>
     </div>
@@ -340,6 +345,7 @@ select {
   const voiceSel = document.getElementById('voiceSel');
   const speakTog = document.getElementById('speakTog');
   const beepTog = document.getElementById('beepTog');
+  const startSeqTog = document.getElementById('startSeqTog');
   const lockGateTog = document.getElementById('lockGateTog');
   const frontTog = document.getElementById('frontTog');
   const testVoiceBtn = document.getElementById('testVoiceBtn');
@@ -370,6 +376,7 @@ select {
     rate.value = s.rate != null ? s.rate : 1.0;
     speakTog.checked = s.speak !== false;
     beepTog.checked = s.beep !== false;
+    startSeqTog.checked = !!s.startSeq;
     lockGateTog.checked = !!s.lockGate;
     frontTog.checked = !!s.front;
     if (s.gate) {
@@ -382,7 +389,7 @@ select {
   function saveSettings() {
     const s = {
       sensitivity: +sens.value, lockout: +lock.value, rate: +rate.value,
-      speak: speakTog.checked, beep: beepTog.checked,
+      speak: speakTog.checked, beep: beepTog.checked, startSeq: startSeqTog.checked,
       lockGate: lockGateTog.checked, front: frontTog.checked,
       voice: voiceSel.value,
       gate: { left: gate.style.left, top: gate.style.top, width: gate.style.width, height: gate.style.height },
@@ -660,17 +667,27 @@ select {
 
   // ---------- Sound ----------
   let audioCtx = null;
-  function beep(freq, dur) {
-    if (!beepTog.checked) return;
+  function ensureAudio() {
+    // Call from a user gesture so later scheduled tones are allowed to play.
     try {
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
       if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+    return audioCtx;
+  }
+  // force=true plays even when the "beep on each pass" toggle is off
+  // (used for the race start tone, which is the whole point of the sequence).
+  function beep(freq, dur, force) {
+    if (!force && !beepTog.checked) return;
+    try {
+      ensureAudio();
+      if (!audioCtx) return;
       const o = audioCtx.createOscillator(), g = audioCtx.createGain();
       o.type = 'triangle'; o.frequency.value = freq;
       g.gain.value = 0.0001;
       o.connect(g); g.connect(audioCtx.destination);
       const t = audioCtx.currentTime;
-      g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(force ? 0.5 : 0.35, t + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur / 1000);
       o.start(t); o.stop(t + dur / 1000 + 0.02);
     } catch (e) {}
@@ -681,27 +698,93 @@ select {
   }
 
   // ---------- Controls ----------
-  function arm() {
+  function goLive() {
+    // Detection becomes active; the first gate pass starts lap 1.
+    state.arming = false;
     state.running = true;
     state.lastCross = 0;
     state.lapStart = 0;
     state.prevGray = null; // reset baseline so the first frame isn't a false trigger
+    curTimeEl.textContent = '0.00';
+    gateLabel.textContent = 'ARMED — START / FINISH';
+  }
+
+  function clearStartTimers() {
+    if (state.startTimer) { clearTimeout(state.startTimer); state.startTimer = null; }
+    if (state.speechFallback) { clearTimeout(state.speechFallback); state.speechFallback = null; }
+  }
+
+  // Race start sequence: "Arm your whoops…" then a RANDOM tone under 5 seconds
+  // (randomized so pilots can't anticipate the go), then detection goes live.
+  function startSequence() {
+    clearStartTimers();
+    state.arming = true;
+    state.running = false;
+    armBtn.textContent = 'STOP';
+    armBtn.classList.add('running');
+    curTimeEl.textContent = '0.00';
+    curSubEl.textContent = 'Arm your whoops…';
+    gateLabel.textContent = 'GET READY…';
+    ensureAudio(); // unlock audio within this click gesture so the tone can fire later
+
+    const beginRandom = () => {
+      if (!state.arming) return; // cancelled via STOP
+      curSubEl.textContent = 'Starting on the tone…';
+      const delay = 2000 + Math.random() * 3000; // 2.0–5.0s → "in less than five"
+      state.startTimer = setTimeout(fireStart, delay);
+    };
+
+    const line = 'Arm your whoops. Starting on the tone in less than five.';
+    if (speakTog.checked && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(line);
+        u.rate = +rate.value;
+        const v = voices.find(vv => vv.name === voiceSel.value);
+        if (v) u.voice = v;
+        let started = false;
+        const kick = () => { if (started) return; started = true; beginRandom(); };
+        u.onend = kick;
+        // Fallback: some browsers never fire onend — start the countdown anyway.
+        state.speechFallback = setTimeout(kick, 4500);
+        window.speechSynthesis.speak(u);
+      } catch (e) { beginRandom(); }
+    } else {
+      beginRandom();
+    }
+  }
+
+  function fireStart() {
+    state.startTimer = null;
+    goLive();
+    curSubEl.textContent = 'GO! Fly through the gate';
+    flashScreen();
+    beep(1000, 260, true); // the start tone — plays even if per-pass beeps are off
+  }
+
+  function arm() {
+    if (startSeqTog.checked) { startSequence(); return; }
+    goLive();
     armBtn.textContent = 'STOP';
     armBtn.classList.add('running');
     curSubEl.textContent = 'Armed — fly through the gate';
-    curTimeEl.textContent = '0.00';
-    gateLabel.textContent = 'ARMED — START / FINISH';
     speak('Timer armed');
   }
+
   function stop() {
+    clearStartTimers();
+    const wasArming = state.arming;
+    state.arming = false;
     state.running = false;
+    if (window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch (e) {} }
     armBtn.textContent = 'ARM TIMER';
     armBtn.classList.remove('running');
-    curSubEl.textContent = 'Stopped';
+    curSubEl.textContent = wasArming ? 'Start cancelled' : 'Stopped';
     gateLabel.textContent = 'START / FINISH GATE';
-    speak('Timer stopped');
+    if (!wasArming) speak('Timer stopped');
   }
-  armBtn.addEventListener('click', () => { state.running ? stop() : arm(); });
+
+  armBtn.addEventListener('click', () => { (state.running || state.arming) ? stop() : arm(); });
 
   resetBtn.addEventListener('click', () => {
     state.laps = []; state.best = Infinity; state.lapStart = 0; state.lastCross = 0;
@@ -719,7 +802,7 @@ select {
 
   [sens, lock, rate].forEach(el => el.addEventListener('input', () => { applySettings(); }));
   [sens, lock, rate].forEach(el => el.addEventListener('change', saveSettings));
-  [speakTog, beepTog, lockGateTog].forEach(el => el.addEventListener('change', () => { applySettings(); saveSettings(); }));
+  [speakTog, beepTog, startSeqTog, lockGateTog].forEach(el => el.addEventListener('change', () => { applySettings(); saveSettings(); }));
   voiceSel.addEventListener('change', saveSettings);
 
   // ---------- Drag / resize gate ----------
