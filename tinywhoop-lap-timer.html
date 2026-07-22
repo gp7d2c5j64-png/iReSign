@@ -75,6 +75,14 @@ html, body {
 #gate .handle.tr { right: -15px; top: -15px; }
 #gate .handle.bl { left: -15px; bottom: -15px; }
 #gate .handle.br { right: -15px; bottom: -15px; }
+/* Edge handles — stretch a single dimension */
+#gate .handle.edge { border-radius: 7px; }
+#gate .handle.edge.t, #gate .handle.edge.b { left: 50%; transform: translateX(-50%); width: 42px; height: 18px; }
+#gate .handle.edge.l, #gate .handle.edge.r { top: 50%; transform: translateY(-50%); width: 18px; height: 42px; }
+#gate .handle.edge.t { top: -9px; }
+#gate .handle.edge.b { bottom: -9px; }
+#gate .handle.edge.l { left: -9px; }
+#gate .handle.edge.r { right: -9px; }
 #gate.hot .handle { background: var(--warn); }
 #gate.locked .handle { display: none; }
 #gate.locked { cursor: default; }
@@ -216,6 +224,10 @@ select {
     <div class="handle tr" data-corner="tr"></div>
     <div class="handle bl" data-corner="bl"></div>
     <div class="handle br" data-corner="br"></div>
+    <div class="handle edge t" data-corner="t"></div>
+    <div class="handle edge r" data-corner="r"></div>
+    <div class="handle edge b" data-corner="b"></div>
+    <div class="handle edge l" data-corner="l"></div>
   </div>
 </div>
 
@@ -838,18 +850,16 @@ select {
     drag = { mode: 'move', sx: p.clientX, sy: p.clientY, left: r.left - s.left, top: r.top - s.top, w: r.width, h: r.height, stage: s };
   }
 
-  // Drag any corner to resize, anchoring the opposite corner in place.
-  function startResize(e, corner) {
+  // Drag a corner (two edges) or an edge (one edge) to resize; every edge not
+  // named in `dir` stays fixed. dir is any of t/b/l/r, e.g. 'tl', 'br', 't', 'r'.
+  function startResize(e, dir) {
     if (lockGateTog.checked) return;
     e.preventDefault(); e.stopPropagation();
-    const p = pt(e), r = gate.getBoundingClientRect(), s = stageRect();
-    const l = r.left - s.left, t = r.top - s.top, rt = l + r.width, bt = t + r.height;
-    let ax, ay; // anchor = the corner that stays fixed
-    if (corner === 'br') { ax = l;  ay = t;  }
-    else if (corner === 'tl') { ax = rt; ay = bt; }
-    else if (corner === 'tr') { ax = l;  ay = bt; }
-    else { ax = rt; ay = t; } // bl
-    drag = { mode: 'resize', ax, ay, stage: s };
+    const r = gate.getBoundingClientRect(), s = stageRect();
+    drag = {
+      mode: 'resize', dir, stage: s,
+      l: r.left - s.left, t: r.top - s.top, r: r.right - s.left, b: r.bottom - s.top,
+    };
   }
 
   function moveDrag(e) {
@@ -864,18 +874,14 @@ select {
     } else {
       const mx = Math.max(0, Math.min(s.width, p.clientX - s.left));
       const my = Math.max(0, Math.min(s.height, p.clientY - s.top));
-      const ax = drag.ax, ay = drag.ay;
-      let w = Math.max(MIN_GATE, Math.abs(mx - ax));
-      let h = Math.max(MIN_GATE, Math.abs(my - ay));
-      let left = mx < ax ? ax - w : ax;
-      let top  = my < ay ? ay - h : ay;
-      if (left < 0) { w += left; left = 0; }
-      if (top  < 0) { h += top;  top = 0; }
-      if (left + w > s.width)  w = s.width  - left;
-      if (top  + h > s.height) h = s.height - top;
-      w = Math.max(MIN_GATE, w); h = Math.max(MIN_GATE, h);
+      let left = drag.l, top = drag.t, right = drag.r, bottom = drag.b;
+      // Only the named edge(s) follow the pointer; opposite edge is the anchor.
+      if (drag.dir.indexOf('l') !== -1) left   = Math.max(0, Math.min(mx, right - MIN_GATE));
+      if (drag.dir.indexOf('r') !== -1) right  = Math.min(s.width, Math.max(mx, left + MIN_GATE));
+      if (drag.dir.indexOf('t') !== -1) top    = Math.max(0, Math.min(my, bottom - MIN_GATE));
+      if (drag.dir.indexOf('b') !== -1) bottom = Math.min(s.height, Math.max(my, top + MIN_GATE));
       gate.style.left = left + 'px'; gate.style.top = top + 'px';
-      gate.style.width = w + 'px'; gate.style.height = h + 'px';
+      gate.style.width = (right - left) + 'px'; gate.style.height = (bottom - top) + 'px';
     }
   }
   function endDrag() { if (drag) { drag = null; saveSettings(); } }
