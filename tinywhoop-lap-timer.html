@@ -296,6 +296,11 @@ select {
     </div>
 
     <div class="row toggle">
+      <label style="margin:0">Whoop mode — only count a small, fast object; ignore people, hands, shake &amp; lighting</label>
+      <label class="switch"><input type="checkbox" id="whoopModeTog" checked><span></span></label>
+    </div>
+
+    <div class="row toggle">
       <label style="margin:0">Race start sequence — “Arm your whoops…” then a random start tone (under 5s)</label>
       <label class="switch"><input type="checkbox" id="startSeqTog"><span></span></label>
     </div>
@@ -305,8 +310,13 @@ select {
       <label class="switch"><input type="checkbox" id="lockGateTog"><span></span></label>
     </div>
 
+    <div class="row">
+      <label>Camera (any webcam, built-in, or USB)</label>
+      <select id="camSel"><option value="">Default camera</option></select>
+    </div>
+
     <div class="row toggle">
-      <label style="margin:0">Use front camera</label>
+      <label style="margin:0">Use front camera (phones — quick flip)</label>
       <label class="switch"><input type="checkbox" id="frontTog"><span></span></label>
     </div>
 
@@ -364,9 +374,11 @@ select {
   const voiceSel = document.getElementById('voiceSel');
   const speakTog = document.getElementById('speakTog');
   const beepTog = document.getElementById('beepTog');
+  const whoopModeTog = document.getElementById('whoopModeTog');
   const startSeqTog = document.getElementById('startSeqTog');
   const lockGateTog = document.getElementById('lockGateTog');
   const frontTog = document.getElementById('frontTog');
+  const camSel = document.getElementById('camSel');
   const testVoiceBtn = document.getElementById('testVoiceBtn');
 
   // ---------- Detection tuning ----------
@@ -376,6 +388,13 @@ select {
   // the change across the whole box (which needed the whoop to nearly fill it).
   const PIX_DELTA = 16;   // 0..255 per-pixel change to count as motion
   const ACT_FULL  = 25;   // % motion that fills the activity bar / slider top
+
+  // "Whoop mode" shape gates — a whoop is a SMALL, COMPACT, moving blob.
+  // These reject large or scattered motion (a person, a hand, camera shake, a
+  // whole-frame lighting/exposure change) by looking at the moving region.
+  const WHOOP_MAX_MOVE = 0.45; // reject if >45% of the gate is moving (too big)
+  const WHOOP_MAX_BLOB = 0.80; // reject if the motion's bounding box spans >80% of the gate (spread out)
+  const WHOOP_MIN_FILL = 0.12; // require the blob to fill >=12% of its box (dense, not scattered noise)
 
   // ---------- State ----------
   const state = {
@@ -405,6 +424,7 @@ select {
     rate.value = s.rate != null ? s.rate : 1.0;
     speakTog.checked = s.speak !== false;
     beepTog.checked = s.beep !== false;
+    whoopModeTog.checked = s.whoopMode !== false;
     startSeqTog.checked = !!s.startSeq;
     lockGateTog.checked = !!s.lockGate;
     frontTog.checked = !!s.front;
@@ -419,6 +439,7 @@ select {
     const s = {
       sensitivity: +sens.value, lockout: +lock.value, rate: +rate.value,
       speak: speakTog.checked, beep: beepTog.checked, startSeq: startSeqTog.checked,
+      whoopMode: whoopModeTog.checked,
       lockGate: lockGateTog.checked, front: frontTog.checked,
       voice: voiceSel.value,
       gate: { left: gate.style.left, top: gate.style.top, width: gate.style.width, height: gate.style.height },
@@ -437,21 +458,45 @@ select {
   }
 
   // ---------- Camera ----------
-  async function startCamera(facing) {
+  // pref: { deviceId } to pick a specific camera (any webcam / USB / built-in),
+  // or { facing } to hint front/back on phones. Works on desktop and mobile.
+  async function startCamera(pref) {
     if (state.stream) { state.stream.getTracks().forEach(t => t.stop()); state.stream = null; }
-    const constraints = {
-      audio: false,
-      video: {
-        facingMode: { ideal: facing },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
-    };
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const v = { width: { ideal: 1280 }, height: { ideal: 720 } };
+    if (pref && pref.deviceId) v.deviceId = { exact: pref.deviceId };
+    else v.facingMode = { ideal: (pref && pref.facing) || 'environment' };
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: v });
+    } catch (err) {
+      // A specific deviceId can become invalid (unplugged webcam); fall back.
+      if (pref && pref.deviceId) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+      } else { throw err; }
+    }
     state.stream = stream;
-    state.facing = facing;
+    const track = stream.getVideoTracks()[0];
+    state.deviceId = track && track.getSettings ? (track.getSettings().deviceId || '') : '';
     video.srcObject = stream;
     await video.play().catch(() => {});
+    populateCameras();
+  }
+
+  // Enumerate all cameras and fill the picker (labels appear after permission).
+  async function populateCameras() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    try {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const cams = devs.filter(d => d.kind === 'videoinput');
+      camSel.innerHTML = '';
+      cams.forEach((c, i) => {
+        const o = document.createElement('option');
+        o.value = c.deviceId;
+        o.textContent = c.label || ('Camera ' + (i + 1));
+        camSel.appendChild(o);
+      });
+      if (state.deviceId && cams.some(c => c.deviceId === state.deviceId)) camSel.value = state.deviceId;
+    } catch (e) {}
   }
 
   permBtn.addEventListener('click', async () => {
@@ -462,7 +507,7 @@ select {
     }
     permBtn.textContent = 'REQUESTING…';
     try {
-      await startCamera(frontTog.checked ? 'user' : 'environment');
+      await startCamera({ facing: frontTog.checked ? 'user' : 'environment' });
       perm.classList.add('hidden');
       // Prime the speech engine (needs a user gesture on iOS).
       primeVoice();
@@ -482,9 +527,17 @@ select {
   frontTog.addEventListener('change', async () => {
     saveSettings(); applySettings();
     if (state.stream) {
-      try { await startCamera(frontTog.checked ? 'user' : 'environment'); }
+      state.prevGray = null;
+      try { await startCamera({ facing: frontTog.checked ? 'user' : 'environment' }); }
       catch (e) { /* keep old stream */ }
     }
+  });
+
+  camSel.addEventListener('change', async () => {
+    if (!state.stream || !camSel.value) return;
+    state.prevGray = null;
+    try { await startCamera({ deviceId: camSel.value }); }
+    catch (e) { permErr.textContent = 'Could not switch camera.'; }
   });
 
   // ---------- Gate geometry mapping ----------
@@ -538,16 +591,32 @@ select {
       gray[j] = (img[i] * 77 + img[i + 1] * 150 + img[i + 2] * 29) >> 8;
     }
 
-    let diff = 0;
+    let diff = 0, isWhoop = false;
     if (state.prevGray) {
       const prev = state.prevGray;
-      let changed = 0;
-      for (let j = 0; j < n; j++) {
-        let d = gray[j] - prev[j];
-        if (d < 0) d = -d;
-        if (d > PIX_DELTA) changed++;   // count pixels in motion
+      let changed = 0, minX = SAMPLE_W, minY = SAMPLE_H, maxX = -1, maxY = -1;
+      let j = 0;
+      for (let y = 0; y < SAMPLE_H; y++) {
+        for (let x = 0; x < SAMPLE_W; x++, j++) {
+          let d = gray[j] - prev[j];
+          if (d < 0) d = -d;
+          if (d > PIX_DELTA) {
+            changed++;
+            if (x < minX) minX = x; if (x > maxX) maxX = x;
+            if (y < minY) minY = y; if (y > maxY) maxY = y;
+          }
+        }
       }
       diff = (changed / n) * 100; // percent of gate area moving, 0..100
+      // Shape test: is the moving region a small, compact blob (a whoop) rather
+      // than a large/spread-out change (a person, a hand, shake, or lighting)?
+      if (changed > 0) {
+        const bw = maxX - minX + 1, bh = maxY - minY + 1;
+        const moveFrac = changed / n;
+        const blobFrac = (bw * bh) / n;      // how much of the gate the motion spans
+        const fill = changed / (bw * bh);    // how densely it fills that span
+        isWhoop = moveFrac <= WHOOP_MAX_MOVE && blobFrac <= WHOOP_MAX_BLOB && fill >= WHOOP_MIN_FILL;
+      }
     }
     // store current as prev (swap buffers)
     if (!state.prevGray) state.prevGray = new Uint8ClampedArray(n);
@@ -565,8 +634,10 @@ select {
       activityBar.style.background = hot ? 'var(--warn)' : 'var(--accent)';
     }
 
-    // Detection.
-    if (state.running && diff >= state.sensitivity) {
+    // Detection: enough motion, and (in Whoop mode) shaped like a whoop.
+    const enough = diff >= state.sensitivity;
+    const qualifies = enough && (!whoopModeTog.checked || isWhoop);
+    if (state.running && qualifies) {
       const now = performance.now();
       if (now - state.lastCross >= state.lockout) {
         registerCross(now);
@@ -832,7 +903,7 @@ select {
 
   [sens, lock, rate].forEach(el => el.addEventListener('input', () => { applySettings(); }));
   [sens, lock, rate].forEach(el => el.addEventListener('change', saveSettings));
-  [speakTog, beepTog, startSeqTog, lockGateTog].forEach(el => el.addEventListener('change', () => { applySettings(); saveSettings(); }));
+  [speakTog, beepTog, whoopModeTog, startSeqTog, lockGateTog].forEach(el => el.addEventListener('change', () => { applySettings(); saveSettings(); }));
   voiceSel.addEventListener('change', saveSettings);
 
   // ---------- Drag / resize gate ----------
