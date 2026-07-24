@@ -2914,14 +2914,15 @@ function applyAtmosphere() {
   scene.fog.color.setHex(city ? 0xb3bec8 : 0xc3dcd4);
   scene.fog.near = city ? 40 : 60;
   scene.fog.far = city ? 320 : 330;
-  renderer.toneMappingExposure = city ? 1.04 : 1.05;
+  renderer.toneMappingExposure = city ? 0.88 : 1.05;
 
   if (city) {
-    // Bright but flat overcast light — soft shadows, cool, no warm key.
-    hemiLight.color.setHex(0xdae2ea); hemiLight.groundColor.setHex(0xa89f8c); hemiLight.intensity = 1.7;
-    sunLight.color.setHex(0xe6edf4); sunLight.intensity = 1.15; sunLight.position.set(40, 120, -25);
-    sunLight.shadow.radius = 14; fillLight.color.setHex(0xccd6e0); fillLight.intensity = 0.55;
-    bloomPass.strength = 0.16; bloomPass.threshold = 0.9;
+    // Flat overcast light — soft shadows, cool, no warm key (lower exposure so
+    // it isn't blown out).
+    hemiLight.color.setHex(0xdae2ea); hemiLight.groundColor.setHex(0xa89f8c); hemiLight.intensity = 1.45;
+    sunLight.color.setHex(0xe6edf4); sunLight.intensity = 1.0; sunLight.position.set(40, 120, -25);
+    sunLight.shadow.radius = 14; fillLight.color.setHex(0xccd6e0); fillLight.intensity = 0.5;
+    bloomPass.strength = 0.14; bloomPass.threshold = 0.92;
   } else {
     hemiLight.color.setHex(0xbfe0f5); hemiLight.groundColor.setHex(0x59683f); hemiLight.intensity = 0.85;
     sunLight.color.setHex(0xffe9c4); sunLight.intensity = 2.15; sunLight.position.set(70, 105, -60);
@@ -3156,28 +3157,56 @@ function buildCity3D(scene) {
   if (world.balloon) buildBalloon(scene, world.balloon);
 }
 
-// A striped hot-air balloon (envelope + neck + basket + ropes).
+// A detailed hot-air balloon: banded/gored envelope, load ring, burner with a
+// lit flame, woven basket, and suspension ropes.
 function buildBalloon(scene, b) {
   const g = new THREE.Group();
-  const c = _canvas(64), x = c.getContext('2d');
-  const stripes = ['#e8b23a', '#e2622f', '#d83b2e', '#e8b23a', '#f0d24a', '#e2622f'];
-  for (let i = 0; i < 8; i++) { x.fillStyle = stripes[i % stripes.length]; x.fillRect(i * 8, 0, 8, 64); }
+  // Envelope skin: horizontal colour bands + vertical gore seams.
+  const s = 128, c = _canvas(s), x = c.getContext('2d');
+  const bands = [['#f4d64e', 0, 0.24], ['#ec9a34', 0.24, 0.44], ['#dd4030', 0.44, 0.66],
+                 ['#ec9a34', 0.66, 0.83], ['#f4d64e', 0.83, 1]];
+  bands.forEach(([col, a, bb]) => { x.fillStyle = col; x.fillRect(0, a * s, s, (bb - a) * s); });
+  x.strokeStyle = 'rgba(120,60,30,0.45)'; x.lineWidth = 1.5;
+  for (let i = 0; i <= 16; i++) { x.beginPath(); x.moveTo(i * s / 16, 0); x.lineTo(i * s / 16, s); x.stroke(); }
   const tex = new THREE.CanvasTexture(c); tex.wrapS = THREE.RepeatWrapping; tex.encoding = THREE.sRGBEncoding;
-  const env = new THREE.Mesh(
-    new THREE.SphereGeometry(b.r, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.74),
-    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7, metalness: 0.0 }));
-  env.scale.set(1, 1.15, 1); env.position.y = b.r * 1.05; env.castShadow = true; g.add(env);
-  const neck = new THREE.Mesh(new THREE.ConeGeometry(b.r * 0.32, b.r * 0.5, 12),
-    new THREE.MeshStandardMaterial({ color: 0xd83b2e, roughness: 0.7 }));
-  neck.position.y = b.r * 0.5; neck.rotation.x = Math.PI; g.add(neck);
-  const basket = new THREE.Mesh(new THREE.BoxGeometry(b.r * 0.5, b.r * 0.4, b.r * 0.5),
-    new THREE.MeshStandardMaterial({ color: 0x8a5a2c, roughness: 0.9 }));
-  basket.castShadow = true; g.add(basket);
-  const ropeMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a });
-  [[0.22, 0.22], [-0.22, 0.22], [0.22, -0.22], [-0.22, -0.22]].forEach(([rx, rz]) => {
-    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, b.r * 0.6, 4), ropeMat);
-    rope.position.set(rx * b.r, b.r * 0.32, rz * b.r); g.add(rope);
-  });
+  const skin = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.78, metalness: 0.0 });
+
+  // Rounded top + tapered bottom to the mouth = teardrop envelope.
+  const env = new THREE.Mesh(new THREE.SphereGeometry(b.r, 24, 20, 0, Math.PI * 2, 0, Math.PI * 0.8), skin);
+  env.scale.set(1, 1.2, 1); env.position.y = b.r * 1.02; env.castShadow = true; g.add(env);
+  const taper = new THREE.Mesh(new THREE.ConeGeometry(b.r * 0.96, b.r * 0.75, 24, 1, true), skin);
+  taper.position.y = b.r * 0.56; taper.rotation.x = Math.PI; g.add(taper);
+
+  // Load ring at the mouth.
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(b.r * 0.26, 0.06, 8, 18),
+    new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 0.85 }));
+  ring.rotation.x = Math.PI / 2; ring.position.y = b.r * 0.34; g.add(ring);
+
+  // Burner + a lit flame (emissive, so it glows under the envelope).
+  const burner = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.35, 8),
+    new THREE.MeshStandardMaterial({ color: 0x8a8a8a, metalness: 0.6, roughness: 0.4 }));
+  burner.position.y = b.r * 0.3; g.add(burner);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.6, 10),
+    new THREE.MeshStandardMaterial({ color: 0xffb733, emissive: 0xff7a1a, emissiveIntensity: 2.4 }));
+  flame.position.y = b.r * 0.34; g.add(flame);
+
+  // Woven basket with a rim.
+  const basket = new THREE.Mesh(new THREE.BoxGeometry(b.r * 0.5, b.r * 0.42, b.r * 0.5),
+    new THREE.MeshStandardMaterial({ color: 0x9a6a34, roughness: 0.95 }));
+  basket.position.y = -b.r * 0.02; basket.castShadow = true; g.add(basket);
+  const rim = new THREE.Mesh(new THREE.BoxGeometry(b.r * 0.56, b.r * 0.08, b.r * 0.56),
+    new THREE.MeshStandardMaterial({ color: 0x6a4a24, roughness: 0.9 }));
+  rim.position.y = b.r * 0.19; g.add(rim);
+
+  // Suspension ropes from the mouth ring down to the basket.
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a });
+  for (let i = 0; i < 8; i++) {
+    const a = i / 8 * Math.PI * 2;
+    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, b.r * 0.62, 4), ropeMat);
+    rope.position.set(Math.cos(a) * b.r * 0.24, b.r * 0.3, Math.sin(a) * b.r * 0.24);
+    rope.rotation.z = Math.cos(a) * 0.12; rope.rotation.x = -Math.sin(a) * 0.12;
+    g.add(rope);
+  }
   g.position.set(b.x, b.y, MZ(b.z)); scene.add(g);
 }
 
@@ -4057,21 +4086,34 @@ function updatePhysics(dt) {
   }
   for (const t of world.towers) {
     if (!t.colliders) continue;
+    let perched = false;
     for (const c of t.colliders) {
+      const y0 = c.y0 || 0;
+      let horizIn;
       if (c.cyl) {
-        if (cy < c.y1 + CR) {
-          const nx = (cx - c.x) / (c.rx + CR), nz = (cz - c.z) / (c.rz + CR);
-          if (nx * nx + nz * nz < 1) { triggerCrash('Hit a building!'); return; }
-        }
-      } else if (cy > c.y0 - CR && cy < c.y1 + CR &&
-                 cx > c.x0 - CR && cx < c.x1 + CR && cz > c.z0 - CR && cz < c.z1 + CR) {
-        triggerCrash('Hit a building!'); return;
+        const nx = (cx - c.x) / (c.rx + CR), nz = (cz - c.z) / (c.rz + CR);
+        horizIn = nx * nx + nz * nz < 1;
+      } else {
+        horizIn = cx > c.x0 - CR && cx < c.x1 + CR && cz > c.z0 - CR && cz < c.z1 + CR;
       }
+      if (!horizIn || cy < y0 - CR || cy > c.y1 + CR) continue;
+      // Inside this tier's volume. If we arrived from above its roof, you can
+      // PERCH/land on the roof (or a setback ledge); otherwise you hit the wall.
+      if (prevPos[1] >= c.y1 - 0.03) {
+        const impactG = Math.hypot(v[0], v[1], v[2]) / 9.81;
+        if (impactG > 7) { triggerCrash(`Impact: ${impactG.toFixed(1)}G — Too hard!`); return; }
+        craft.pos[1] = c.y1 + 0.001;
+        v[1] = Math.max(0, v[1]);
+        v[0] *= 0.85; v[2] *= 0.85; // rooftop friction, like the ground
+        perched = true; break;
+      }
+      triggerCrash('Hit a building!'); return;
     }
+    if (perched) break;
   }
   if (world.balloon) {
     const bl = world.balloon;
-    if (Math.hypot(cx - bl.x, cy - (bl.y + bl.r), cz - bl.z) < bl.r + CR) {
+    if (Math.hypot(cx - bl.x, cy - (bl.y + bl.r * 1.2), cz - bl.z) < bl.r * 1.15 + CR) {
       triggerCrash('Hit the balloon!'); return;
     }
   }
