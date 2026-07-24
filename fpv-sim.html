@@ -1703,6 +1703,12 @@ function buildCity() {
       }
     }
   }
+  // A colossal landmark supertall — 4× the tallest ordinary tower.
+  const tallest = world.towers.reduce((m, t) => Math.max(m, t.h), 0);
+  world.towers.push({
+    x: 30, z: 135, w: 26, d: 26, h: tallest * 4,
+    glass: true, color: 0x93aec6, shape: 'taper', tiers: 7, antenna: true, litSeed: 7, mega: true,
+  });
   // A hot-air balloon drifting among the towers (a nod to the reference).
   world.balloon = { x: 6, y: 66, z: 96, r: 5 };
   addRaceGates();
@@ -1795,8 +1801,8 @@ function initRenderer() {
   });
   cloudUniforms = {
     sunDir: { value: new THREE.Vector3(70, 105, -60).normalize() },
-    top: { value: new THREE.Color(0x36485a) }, horizon: { value: new THREE.Color(0xbcc7cf) },
-    cloudLo: { value: new THREE.Color(0x51606d) }, cloudHi: { value: new THREE.Color(0xbcc6cd) },
+    top: { value: new THREE.Color(0x2f6cba) }, horizon: { value: new THREE.Color(0xbcd6ee) },
+    cloudLo: { value: new THREE.Color(0xc4ced6) }, cloudHi: { value: new THREE.Color(0xffffff) },
     time: { value: 0 },
   };
   cloudySkyMat = new THREE.ShaderMaterial({
@@ -1813,13 +1819,14 @@ function initRenderer() {
         float h = clamp(d.y, 0.0, 1.0);
         vec3 sky = mix(horizon, top, pow(h, 0.5));
         vec2 uv = d.xz / (abs(d.y) + 0.26);
-        float f = fbm(uv * 1.5 + vec2(time*0.004, time*0.002));
-        float cover = smoothstep(0.30, 0.85, f) * smoothstep(-0.02, 0.30, d.y + 0.12);
-        vec3 cloud = mix(cloudLo, cloudHi, smoothstep(0.3,0.95,f));
+        float f = fbm(uv * 1.3 + vec2(time*0.004, time*0.002));
+        // A few scattered puffy clouds in the blue (higher threshold = fewer).
+        float cover = smoothstep(0.48, 0.72, f) * smoothstep(0.02, 0.4, d.y + 0.06);
+        vec3 cloud = mix(cloudLo, cloudHi, smoothstep(0.5,0.9,f));
         sky = mix(sky, cloud, cover*0.9);
         float s = max(dot(d, normalize(sunDir)), 0.0);
-        sky += vec3(0.9,0.93,0.96) * pow(s, 10.0) * 0.22;   // broad hazy glow
-        sky += vec3(1.0,0.99,0.96) * pow(s, 90.0) * 0.45;   // soft veiled disc
+        sky += vec3(1.0,0.97,0.9) * pow(s, 6.0) * 0.18;    // broad glow
+        sky += vec3(1.0,0.98,0.92) * pow(s, 120.0) * 0.7;  // bright sun disc
         gl_FragColor = vec4(sky, 1.0);
       }`,
   });
@@ -1891,30 +1898,29 @@ function initRenderer() {
 function applyAtmosphere() {
   const city = config.map === 'city';
   skyMesh.material = city ? cloudySkyMat : gradientSkyMat;
-  scene.background.setHex(city ? 0x8f9aa4 : 0x9ec9e8);
-  scene.fog.color.setHex(city ? 0xb3bec8 : 0xc3dcd4);
-  scene.fog.near = city ? 40 : 60;
-  scene.fog.far = city ? 320 : 330;
-  renderer.toneMappingExposure = city ? 0.88 : 1.05;
+  scene.background.setHex(city ? 0x8fb4dc : 0x9ec9e8);
+  scene.fog.color.setHex(city ? 0xc4daf0 : 0xc3dcd4);
+  scene.fog.near = city ? 60 : 60;
+  scene.fog.far = city ? 430 : 330;
+  renderer.toneMappingExposure = city ? 0.78 : 1.05;
 
   if (city) {
-    // Flat overcast light — soft shadows, cool, no warm key (lower exposure so
-    // it isn't blown out).
-    hemiLight.color.setHex(0xdae2ea); hemiLight.groundColor.setHex(0xa89f8c); hemiLight.intensity = 1.45;
-    sunLight.color.setHex(0xe6edf4); sunLight.intensity = 1.0; sunLight.position.set(40, 120, -25);
-    sunLight.shadow.radius = 14; fillLight.color.setHex(0xccd6e0); fillLight.intensity = 0.5;
-    bloomPass.strength = 0.14; bloomPass.threshold = 0.92;
+    // Clear, sunny day — a warm directional sun with a blue sky fill; low
+    // exposure keeps the bright sky/glass from blowing out.
+    hemiLight.color.setHex(0xbcd8f2); hemiLight.groundColor.setHex(0x9a9280); hemiLight.intensity = 1.0;
+    sunLight.color.setHex(0xfff0d6); sunLight.intensity = 1.6; sunLight.position.set(70, 105, -60);
+    sunLight.shadow.radius = 8; fillLight.color.setHex(0xbcd0e6); fillLight.intensity = 0.3;
+    bloomPass.strength = 0.2; bloomPass.threshold = 0.88;
   } else {
     hemiLight.color.setHex(0xbfe0f5); hemiLight.groundColor.setHex(0x59683f); hemiLight.intensity = 0.85;
     sunLight.color.setHex(0xffe9c4); sunLight.intensity = 2.15; sunLight.position.set(70, 105, -60);
     sunLight.shadow.radius = 9; fillLight.color.setHex(0xa8c4e0); fillLight.intensity = 0.28;
     bloomPass.strength = 0.28; bloomPass.threshold = 0.86;
   }
-  // The overcast sun is a soft veiled patch (dim, cool, no hard disc); the clear
-  // sky keeps the bright warm billboard.
-  sunSprites.forEach((sp, i) => {
-    sp.material.color.setHex(city ? 0xcdd6de : 0xffffff);
-    sp.material.opacity = city ? (i === 2 ? 0.0 : 0.35) : 1.0;
+  // Both maps now show a real sun disc (warm/white billboard).
+  sunSprites.forEach((sp) => {
+    sp.material.color.setHex(city ? 0xfff2df : 0xffffff);
+    sp.material.opacity = 1.0;
   });
 }
 
@@ -2125,10 +2131,11 @@ function buildCity3D(scene) {
       ac.position.set((Math.random() - 0.5) * cw * 0.6, by + 0.35, (Math.random() - 0.5) * cd * 0.6); ac.castShadow = true; g.add(ac);
     }
     if (t.antenna) {
-      const antH = 3 + Math.random() * 8;
-      const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.14, antH, 6), antMat);
+      const antH = t.mega ? t.h * 0.16 : 3 + Math.random() * 8;
+      const antR = t.mega ? 0.9 : 0.14;
+      const ant = new THREE.Mesh(new THREE.CylinderGeometry(antR * 0.3, antR, antH, 8), antMat);
       ant.position.set(0, by + antH / 2, 0); ant.castShadow = true; g.add(ant);
-      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 6), beaconMat);
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(t.mega ? 1.1 : 0.26, 10, 8), beaconMat);
       beacon.position.set(0, by + antH, 0); g.add(beacon);
     }
     g.position.set(t.x, 0, MZ(t.z));
