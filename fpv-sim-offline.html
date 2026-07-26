@@ -2722,11 +2722,11 @@ function buildCity() {
       }
     }
   }
-  // A colossal landmark supertall — 4× the tallest ordinary tower.
-  const tallest = world.towers.reduce((m, t) => Math.max(m, t.h), 0);
+  // A colossal 1000 m landmark — a single uniform-width prism (no setback
+  // ledges), flat roof on top.
   const mega = {
-    x: 30, z: 135, w: 26, d: 26, h: tallest * 4,
-    glass: true, color: 0x93aec6, shape: 'taper', tiers: 7, antenna: true, litSeed: 7, mega: true,
+    x: 34, z: 145, w: 46, d: 46, h: 1000,
+    glass: true, color: 0x93aec6, shape: 'box', tiers: 1, antenna: true, litSeed: 7, mega: true,
   };
   // Clear a plaza around its base so nothing overlaps the tower (or the portal).
   world.towers = world.towers.filter(t => Math.hypot(t.x - mega.x, t.z - mega.z) > mega.w);
@@ -2926,8 +2926,8 @@ function applyAtmosphere() {
   skyMesh.material = city ? cloudySkyMat : gradientSkyMat;
   scene.background.setHex(city ? 0x8fb4dc : 0x9ec9e8);
   scene.fog.color.setHex(city ? 0xc4daf0 : 0xc3dcd4);
-  scene.fog.near = city ? 60 : 60;
-  scene.fog.far = city ? 430 : 330;
+  scene.fog.near = city ? 80 : 60;
+  scene.fog.far = city ? 1200 : 330; // far enough to see the 1000 m landmark whole
   renderer.toneMappingExposure = city ? 0.78 : 1.05;
 
   if (city) {
@@ -3157,7 +3157,7 @@ function buildCity3D(scene) {
       ac.position.set((Math.random() - 0.5) * cw * 0.6, by + 0.35, (Math.random() - 0.5) * cd * 0.6); ac.castShadow = true; g.add(ac);
     }
     if (t.antenna) {
-      const antH = t.mega ? t.h * 0.16 : 3 + Math.random() * 8;
+      const antH = t.mega ? t.h * 0.09 : 3 + Math.random() * 8;
       const antR = t.mega ? 0.9 : 0.14;
       const ant = new THREE.Mesh(new THREE.CylinderGeometry(antR * 0.3, antR, antH, 8), antMat);
       ant.position.set(0, by + antH / 2, 0); ant.castShadow = true; g.add(ant);
