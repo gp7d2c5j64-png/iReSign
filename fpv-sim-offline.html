@@ -2733,9 +2733,16 @@ function buildCity() {
   world.towers.push(mega);
   // A hot-air balloon drifting among the towers (a nod to the reference).
   world.balloon = { x: 6, y: 66, z: 96, r: 5 };
-  // Portal right at the foot of the tallest tower, facing the avenue; flying
-  // through it warps you to the tower's roof.
-  world.portal = { x: mega.x - mega.w / 2 - 2.6, z: mega.z, y: 3.2, r: 2.6, rot: Math.PI / 2 };
+  // Two portals on the tower's avenue-facing side:
+  //  • base (purple) → warps up to the roof deck
+  //  • 500 m (green)  → warps back down to the ground
+  const px = mega.x - mega.w / 2 - 2.6;
+  world.portals = [
+    { x: px, z: mega.z, y: 3.4, r: 2.6, rot: Math.PI / 2, color: 0xc26bff, emis: 0x9a2bff,
+      dest: [mega.x, mega.h + 5, mega.z], msg: '⚡ WARPED TO THE TOP' },
+    { x: px, z: mega.z, y: 500, r: 2.6, rot: Math.PI / 2, color: 0x5cff9a, emis: 0x1ecb6a,
+      dest: [mega.x - mega.w / 2 - 7, 3.5, mega.z], msg: '⚡ WARPED TO THE BOTTOM' },
+  ];
   addRaceGates();
 }
 
@@ -2767,7 +2774,7 @@ function linearizeMaterials(root) {
   });
 }
 let gateArrow = null; // bobbing marker over the active checkpoint
-let portalDisc = null; // swirling portal face (animated)
+const portalDiscs = []; // swirling portal faces (animated)
 const windObjects = []; // canopies/fronds that sway in the breeze
 
 // White glyph on transparent canvas → sprite texture. Tinted per-state via the
@@ -3150,8 +3157,29 @@ function buildCity3D(scene) {
         by += tierH; cw *= setback; cd *= setback;
       }
     }
-    // Rooftop clutter.
-    for (let i = 0; i < 1 + (Math.floor(t.litSeed) % 3); i++) {
+    // Mega tower: a wide flat rooftop deck (a proper landing pad) that
+    // overhangs the tower, with its own collider so you can perch on the whole
+    // platform. A painted ring marks the pad.
+    if (t.mega) {
+      const deckW = t.w * 1.6, deckH = 1.6;
+      const deck = new THREE.Mesh(unit, new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.9 }));
+      deck.scale.set(deckW, deckH, deckW); deck.position.y = by + deckH / 2;
+      deck.castShadow = true; deck.receiveShadow = true; g.add(deck);
+      // Low parapet rail around the edge.
+      const railMat = new THREE.MeshStandardMaterial({ color: 0x6a7078, roughness: 0.85 });
+      [[deckW / 2, 0, 0.4, deckW], [-deckW / 2, 0, 0.4, deckW], [0, deckW / 2, deckW, 0.4], [0, -deckW / 2, deckW, 0.4]].forEach(([lx, lz, sx, sz]) => {
+        const rail = new THREE.Mesh(unit, railMat);
+        rail.scale.set(sx, 1.1, sz); rail.position.set(lx, by + deckH + 0.55, lz); g.add(rail);
+      });
+      // Helipad ring marking.
+      const pad = new THREE.Mesh(new THREE.RingGeometry(deckW * 0.24, deckW * 0.3, 32),
+        new THREE.MeshStandardMaterial({ color: 0xf0d24a, roughness: 0.8, side: THREE.DoubleSide }));
+      pad.rotation.x = -Math.PI / 2; pad.position.y = by + deckH + 0.02; g.add(pad);
+      t.colliders.push({ x0: t.x - deckW / 2, x1: t.x + deckW / 2, z0: t.z - deckW / 2, z1: t.z + deckW / 2, y0: by, y1: by + deckH });
+      by += deckH;
+    }
+    // Rooftop clutter (not on the mega tower's helipad).
+    for (let i = 0; !t.mega && i < 1 + (Math.floor(t.litSeed) % 3); i++) {
       const ac = new THREE.Mesh(unit, acMat);
       const s2 = 0.7 + Math.random() * 1.1; ac.scale.set(s2, 0.5 + Math.random() * 0.7, s2);
       ac.position.set((Math.random() - 0.5) * cw * 0.6, by + 0.35, (Math.random() - 0.5) * cd * 0.6); ac.castShadow = true; g.add(ac);
@@ -3169,14 +3197,14 @@ function buildCity3D(scene) {
   });
 
   if (world.balloon) buildBalloon(scene, world.balloon);
-  if (world.portal) buildPortal(scene, world.portal);
+  (world.portals || []).forEach(pt => buildPortal(scene, pt));
 }
 
 // A glowing swirling portal ring (vertical, facing down the avenue).
 function buildPortal(scene, pt) {
   const g = new THREE.Group();
   const ring = new THREE.Mesh(new THREE.TorusGeometry(pt.r, 0.28, 16, 44),
-    new THREE.MeshStandardMaterial({ color: 0xc26bff, emissive: 0x9a2bff, emissiveIntensity: 2.4, metalness: 0.4, roughness: 0.3 }));
+    new THREE.MeshStandardMaterial({ color: pt.color || 0xc26bff, emissive: pt.emis || 0x9a2bff, emissiveIntensity: 2.4, metalness: 0.4, roughness: 0.3 }));
   ring.castShadow = true; g.add(ring);
   // Swirl face texture.
   const c = _canvas(128), x = c.getContext('2d');
@@ -3192,8 +3220,8 @@ function buildPortal(scene, pt) {
   }
   const tex = new THREE.CanvasTexture(c);
   const disc = new THREE.Mesh(new THREE.CircleGeometry(pt.r * 0.94, 40),
-    new THREE.MeshBasicMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
-  g.add(disc); portalDisc = disc;
+    new THREE.MeshBasicMaterial({ map: tex, color: pt.color || 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  g.add(disc); portalDiscs.push(disc);
   g.rotation.y = pt.rot || 0; // face the approach direction
   g.position.set(pt.x, pt.y, MZ(pt.z));
   scene.add(g);
@@ -3731,7 +3759,9 @@ function buildMapData() {
   ['houses', 'palms', 'jungle', 'bushes', 'rocks', 'logs', 'driveways', 'walls', 'gates', 'towers']
     .forEach(k => { world[k].length = 0; });
   world.balloon = null;
-  world.portal = null;
+  world.portals = [];
+  // The city's landmark tower sits well out from spawn, so give it more room.
+  MAP_BOUNDS.radius = config.map === 'city' ? 320 : 175;
   if (config.map === 'city') buildCity(); else buildNeighborhood();
 }
 
@@ -3754,7 +3784,7 @@ function rebuildWorld() {
   worldGroup = new THREE.Group();
   scene.add(worldGroup);
   gateArrow = null;
-  portalDisc = null;
+  portalDiscs.length = 0;
   buildMapData();
   buildScene();
   linearizeMaterials(worldGroup);
@@ -4161,15 +4191,15 @@ function updatePhysics(dt) {
       triggerCrash('Hit the balloon!'); return;
     }
   }
-  // Portal: fly through it to warp to the top of the tallest tower.
-  if (world.portal) {
-    const pt = world.portal;
-    if (segPointDistance(pt.x, pt.y, pt.z, prevPos, craft.pos) < pt.r) {
-      const tall = world.towers.reduce((a, b) => (b.h > a.h ? b : a), world.towers[0]);
-      craft.pos = [tall.x, tall.h + 4, tall.z];
-      craft.vel = [0, 0, 0];
-      flashMsg('⚡ WARPED TO THE TOP');
-      return;
+  // Portals: fly through one to warp to its destination.
+  if (world.portals) {
+    for (const pt of world.portals) {
+      if (segPointDistance(pt.x, pt.y, pt.z, prevPos, craft.pos) < pt.r) {
+        craft.pos = pt.dest.slice();
+        craft.vel = [0, 0, 0];
+        flashMsg(pt.msg || '⚡ WARP');
+        return;
+      }
     }
   }
 
@@ -4259,7 +4289,7 @@ function animate() {
   updatePhysics(dt);
   applyWind(now);
   if (config.map === 'city' && cloudUniforms) cloudUniforms.time.value = now * 0.001;
-  if (portalDisc) portalDisc.rotation.z = now * 0.0013;
+  for (const d of portalDiscs) d.rotation.z = now * 0.0013;
   renderWorld();
   renderSticks();
   updateHUD();
