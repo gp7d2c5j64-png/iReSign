@@ -2730,6 +2730,9 @@ function buildCity() {
   });
   // A hot-air balloon drifting among the towers (a nod to the reference).
   world.balloon = { x: 6, y: 66, z: 96, r: 5 };
+  // A portal at a random spot in the avenue that warps you to the top of the
+  // tallest tower. Kept in the corridor (|x| < 7) so it's clear of buildings.
+  world.portal = { x: (Math.random() - 0.5) * 12, z: -10 + Math.random() * 170, y: 3.5 + Math.random() * 4, r: 2.4 };
   addRaceGates();
 }
 
@@ -2761,6 +2764,7 @@ function linearizeMaterials(root) {
   });
 }
 let gateArrow = null; // bobbing marker over the active checkpoint
+let portalDisc = null; // swirling portal face (animated)
 const windObjects = []; // canopies/fronds that sway in the breeze
 
 // White glyph on transparent canvas → sprite texture. Tinted per-state via the
@@ -3162,6 +3166,33 @@ function buildCity3D(scene) {
   });
 
   if (world.balloon) buildBalloon(scene, world.balloon);
+  if (world.portal) buildPortal(scene, world.portal);
+}
+
+// A glowing swirling portal ring (vertical, facing down the avenue).
+function buildPortal(scene, pt) {
+  const g = new THREE.Group();
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(pt.r, 0.28, 16, 44),
+    new THREE.MeshStandardMaterial({ color: 0xc26bff, emissive: 0x9a2bff, emissiveIntensity: 2.4, metalness: 0.4, roughness: 0.3 }));
+  ring.castShadow = true; g.add(ring);
+  // Swirl face texture.
+  const c = _canvas(128), x = c.getContext('2d');
+  const grd = x.createRadialGradient(64, 64, 3, 64, 64, 64);
+  grd.addColorStop(0, 'rgba(244,220,255,0.95)'); grd.addColorStop(0.4, 'rgba(160,70,255,0.7)');
+  grd.addColorStop(0.8, 'rgba(80,20,160,0.35)'); grd.addColorStop(1, 'rgba(40,0,90,0)');
+  x.fillStyle = grd; x.fillRect(0, 0, 128, 128);
+  x.strokeStyle = 'rgba(224,190,255,0.5)'; x.lineWidth = 2;
+  for (let i = 0; i < 7; i++) {
+    x.beginPath();
+    for (let a = 0; a < 6.3; a += 0.2) { const rr = 6 + a * 8, px = 64 + Math.cos(a + i) * rr, py = 64 + Math.sin(a + i) * rr; a === 0 ? x.moveTo(px, py) : x.lineTo(px, py); }
+    x.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(pt.r * 0.94, 40),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  g.add(disc); portalDisc = disc;
+  g.position.set(pt.x, pt.y, MZ(pt.z));
+  scene.add(g);
 }
 
 // A detailed hot-air balloon: banded/gored envelope, load ring, burner with a
@@ -3696,6 +3727,7 @@ function buildMapData() {
   ['houses', 'palms', 'jungle', 'bushes', 'rocks', 'logs', 'driveways', 'walls', 'gates', 'towers']
     .forEach(k => { world[k].length = 0; });
   world.balloon = null;
+  world.portal = null;
   if (config.map === 'city') buildCity(); else buildNeighborhood();
 }
 
@@ -3718,6 +3750,7 @@ function rebuildWorld() {
   worldGroup = new THREE.Group();
   scene.add(worldGroup);
   gateArrow = null;
+  portalDisc = null;
   buildMapData();
   buildScene();
   linearizeMaterials(worldGroup);
@@ -4124,6 +4157,17 @@ function updatePhysics(dt) {
       triggerCrash('Hit the balloon!'); return;
     }
   }
+  // Portal: fly through it to warp to the top of the tallest tower.
+  if (world.portal) {
+    const pt = world.portal;
+    if (segPointDistance(pt.x, pt.y, pt.z, prevPos, craft.pos) < pt.r) {
+      const tall = world.towers.reduce((a, b) => (b.h > a.h ? b : a), world.towers[0]);
+      craft.pos = [tall.x, tall.h + 4, tall.z];
+      craft.vel = [0, 0, 0];
+      flashMsg('⚡ WARPED TO THE TOP');
+      return;
+    }
+  }
 
   // Checkpoints must be flown IN ORDER — only the next gate is live. Use the
   // distance from the gate centre to the whole travel segment this frame so
@@ -4211,6 +4255,7 @@ function animate() {
   updatePhysics(dt);
   applyWind(now);
   if (config.map === 'city' && cloudUniforms) cloudUniforms.time.value = now * 0.001;
+  if (portalDisc) portalDisc.rotation.z = now * 0.0013;
   renderWorld();
   renderSticks();
   updateHUD();
