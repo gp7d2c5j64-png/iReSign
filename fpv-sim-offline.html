@@ -2724,15 +2724,18 @@ function buildCity() {
   }
   // A colossal landmark supertall — 4× the tallest ordinary tower.
   const tallest = world.towers.reduce((m, t) => Math.max(m, t.h), 0);
-  world.towers.push({
+  const mega = {
     x: 30, z: 135, w: 26, d: 26, h: tallest * 4,
     glass: true, color: 0x93aec6, shape: 'taper', tiers: 7, antenna: true, litSeed: 7, mega: true,
-  });
+  };
+  // Clear a plaza around its base so nothing overlaps the tower (or the portal).
+  world.towers = world.towers.filter(t => Math.hypot(t.x - mega.x, t.z - mega.z) > mega.w);
+  world.towers.push(mega);
   // A hot-air balloon drifting among the towers (a nod to the reference).
   world.balloon = { x: 6, y: 66, z: 96, r: 5 };
-  // A portal at a random spot in the avenue that warps you to the top of the
-  // tallest tower. Kept in the corridor (|x| < 7) so it's clear of buildings.
-  world.portal = { x: (Math.random() - 0.5) * 12, z: -10 + Math.random() * 170, y: 3.5 + Math.random() * 4, r: 2.4 };
+  // Portal right at the foot of the tallest tower, facing the avenue; flying
+  // through it warps you to the tower's roof.
+  world.portal = { x: mega.x - mega.w / 2 - 2.6, z: mega.z, y: 3.2, r: 2.6, rot: Math.PI / 2 };
   addRaceGates();
 }
 
@@ -3191,6 +3194,7 @@ function buildPortal(scene, pt) {
   const disc = new THREE.Mesh(new THREE.CircleGeometry(pt.r * 0.94, 40),
     new THREE.MeshBasicMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
   g.add(disc); portalDisc = disc;
+  g.rotation.y = pt.rot || 0; // face the approach direction
   g.position.set(pt.x, pt.y, MZ(pt.z));
   scene.add(g);
 }
