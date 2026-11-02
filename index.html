@@ -552,6 +552,14 @@ button.secondary {
         </div>
       </div>
       <div class="settings-group">
+        <h3>Momentum</h3>
+        <div class="setting-row">
+          <label>Glide</label>
+          <input type="range" id="momentum" min="0" max="100" value="50">
+          <span class="setting-val" id="val-momentum">50%</span>
+        </div>
+      </div>
+      <div class="settings-group">
         <h3>Propwash</h3>
         <div class="setting-row">
           <label>Turbulence</label>
@@ -751,6 +759,7 @@ const config = {
   stickSize: 1.0, stickOpacity: 1.0, stickDeadzone: 0.08,
   rateSmooth: 0.13,   // seconds — low-pass on commanded rates for the touch sticks
   remoteSmooth: 0.05, // seconds — lighter low-pass for the physical controller
+  momentum: 0.5,    // 0..1 — how far the quad glides (0 = heavy air drag, 1 = almost none)
   propwash: 0.05,   // 0..1 — turbulence when descending through your own prop wake
   inputMode: 'touch', // 'touch' = on-screen sticks; 'remote' = gamepad / USB radio
   map: 'jungle',    // 'jungle' = neighbourhood/jungle; 'city' = downtown skyscrapers
@@ -1540,7 +1549,7 @@ function groundContact(wasGrounded) {
 
 const phys = {
   gravity: 9.81,
-  dragLin: 0.03,   // quadratic-ish air drag coefficient (low = long glide / more momentum)
+  dragLin: 0.0316, // quadratic-ish air drag coefficient; set by the Momentum slider (applyMomentum)
   groundY: 0.12,
 };
 
@@ -2876,6 +2885,7 @@ function setupMenu() {
   bindRange('rate-yaw-center', v => { config.centerYaw = v; }, v => v + '°/s', 'val-yaw-center');
   bindRange('expo-rp', v => { config.expoRP = v / 100; }, v => (v / 100).toFixed(2), 'val-expo-rp');
   bindRange('expo-yaw', v => { config.expoYaw = v / 100; }, v => (v / 100).toFixed(2), 'val-expo-yaw');
+  bindRange('momentum', v => { config.momentum = v / 100; applyMomentum(); }, v => v + '%', 'val-momentum');
   bindRange('propwash', v => { config.propwash = v / 100; }, v => v + '%', 'val-propwash');
 
   bindRange('cam-angle', v => { config.camAngle = v; }, v => v + '°', 'val-cam');
@@ -2890,6 +2900,12 @@ function setupMenu() {
   }, v => v + '%', 'val-stick-opacity');
   bindRange('stick-deadzone', v => { config.stickDeadzone = v / 100; }, v => v + '%', 'val-stick-deadzone');
   bindRange('remote-smooth', v => { config.remoteSmooth = v / 1000; }, v => v + ' ms', 'val-remote-smooth');
+}
+
+// Momentum slider -> air-drag coefficient (exponential: 0% = 0.10 heavy drag,
+// 50% = ~0.032, 100% = 0.01 long glide).
+function applyMomentum() {
+  phys.dragLin = 0.10 * Math.pow(0.1, config.momentum);
 }
 
 function bindRange(id, apply, format, valId) {
