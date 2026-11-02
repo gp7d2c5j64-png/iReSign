@@ -5,16 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>FPVSIM.ArhanFPV — Free FPV Drone Flight Simulator</title>
-<meta name="description" content="FPVSIM.ArhanFPV is a free browser-based FPV drone simulator: fly a 5-inch freestyle quad through residential streets in acro mode, with adjustable rates and camera angle.">
-<meta name="robots" content="index, follow">
-<meta property="og:type" content="website">
-<meta property="og:title" content="FPVSIM.ArhanFPV — Free FPV Drone Flight Simulator">
-<meta property="og:description" content="Fly a 5-inch freestyle FPV quad in your browser. Acro mode, adjustable rates and camera angle.">
-<meta name="twitter:card" content="summary">
+<title>FPV Flight Sim — Neighborhood</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-:root { --accent: #f0c168; --accent-2: #d9a441; }
 html, body {
   width: 100%;
   height: 100%;
@@ -62,7 +55,7 @@ canvas { display: block; width: 100%; height: 100%; }
   font-size: 28px;
   margin-bottom: 10px;
   letter-spacing: 0.1em;
-  color: var(--accent);
+  color: #f0c168;
 }
 .menu-container p {
   font-size: 13px;
@@ -98,56 +91,18 @@ canvas { display: block; width: 100%; height: 100%; }
   flex: 1;
   margin: 0 10px;
   height: 5px;
-  accent-color: var(--accent-2);
+  accent-color: #d9a441;
 }
 .setting-val {
   font-family: 'Share Tech Mono', monospace;
-  color: var(--accent-2);
+  color: #d9a441;
   min-width: 55px;
   text-align: right;
   font-size: 12px;
 }
-/* Tap a value to type it with the number keyboard. */
-.setting-val.editable {
-  cursor: pointer;
-  border-bottom: 1px dashed currentColor;
-  padding: 2px 0;
-}
-.setting-val .val-input {
-  width: 64px;
-  font: inherit;
-  font-size: 16px; /* >=16px stops iOS zooming in on focus */
-  color: #e9edf3;
-  background: #12151b;
-  border: 1px solid var(--accent-2);
-  border-radius: 4px;
-  padding: 2px 4px;
-  text-align: right;
-}
-.theme-swatch {
-  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
-  background: var(--accent); margin-right: 6px; vertical-align: -2px;
-  border: 1px solid rgba(255,255,255,0.4);
-}
-#theme-hue {
-  -webkit-appearance: none; appearance: none;
-  height: 8px !important;
-  accent-color: var(--accent);
-  background: linear-gradient(90deg, hsl(0,80%,60%), hsl(60,80%,60%), hsl(120,80%,60%), hsl(180,80%,60%), hsl(240,80%,60%), hsl(300,80%,60%), hsl(360,80%,60%));
-  border-radius: 3px;
-}
-#theme-hue::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none;
-  width: 18px; height: 18px; border-radius: 50%;
-  background: var(--accent); border: 2px solid #fff; cursor: pointer;
-}
-#theme-hue::-moz-range-thumb {
-  width: 16px; height: 16px; border-radius: 50%;
-  background: var(--accent); border: 2px solid #fff; cursor: pointer;
-}
 
 button {
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  background: linear-gradient(180deg, #f0c168, #d9a441);
   color: #0a0c10;
   border: none;
   border-radius: 6px;
@@ -260,7 +215,7 @@ button.secondary {
   font-size: 22px;
   font-weight: bold;
   letter-spacing: 0.1em;
-  color: var(--accent);
+  color: #f0c168;
   text-shadow: 0 0 12px rgba(240, 193, 104, 0.8);
   opacity: 0;
 }
@@ -335,7 +290,7 @@ button.secondary {
   top: 50%;
   margin: -56px 0 0 -56px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, var(--accent), var(--accent-2));
+  background: radial-gradient(circle at 35% 30%, #f0c168, #d9a441);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
   pointer-events: none;
   transform: translate(0px, 0px);
@@ -432,18 +387,18 @@ button.secondary {
 .map-row span { flex: 0 0 70px; }
 .map-row select { background: #12151b; color: #e9edf3; border: 1px solid #2c313b; border-radius: 5px; padding: 5px; flex: 1; }
 .map-row label { color: #8d96a6; font-size: 12px; display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
-.map-row .mini { flex: 0 0 auto; margin: 0; padding: 5px 9px; font-size: 11px; background: #1d212a; color: var(--accent); border: 1px solid #5b6577; border-radius: 5px; }
+.map-row .mini { flex: 0 0 auto; margin: 0; padding: 5px 9px; font-size: 11px; background: #1d212a; color: #f0c168; border: 1px solid #5b6577; border-radius: 5px; }
 .map-row select { flex: 1 1 auto; min-width: 0; }
 .calib-card {
   background: #1d212a;
-  border: 1px solid var(--accent-2);
+  border: 1px solid #d9a441;
   border-radius: 10px;
   padding: 22px 24px;
   max-width: 460px;
   width: 92%;
   text-align: center;
 }
-.calib-card h2 { color: var(--accent); font-size: 16px; letter-spacing: 0.08em; }
+.calib-card h2 { color: #f0c168; font-size: 16px; letter-spacing: 0.08em; }
 #calib-sub { color: #5ad1e6; font-size: 15px; font-weight: bold; margin: 10px 0 6px; }
 .calib-card p { color: #e9edf3; font-size: 13px; line-height: 1.5; margin-bottom: 12px; }
 #calib-readout {
@@ -472,7 +427,7 @@ button.secondary {
   padding: 1px 6px;
   font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
-  color: var(--accent);
+  color: #f0c168;
 }
 
 .tabs { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; justify-content: center; }
@@ -486,7 +441,7 @@ button.secondary {
   letter-spacing: 0.05em;
   margin: 0;
 }
-.tab-btn.active { color: var(--accent); border-color: var(--accent-2); }
+.tab-btn.active { color: #f0c168; border-color: #d9a441; }
 .mode-btn {
   flex: 1;
   background: #1d212a;
@@ -499,8 +454,8 @@ button.secondary {
 }
 .mode-btn.active {
   color: #0a0c10;
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
-  border-color: var(--accent-2);
+  background: linear-gradient(180deg, #f0c168, #d9a441);
+  border-color: #d9a441;
 }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
@@ -513,7 +468,7 @@ button.secondary {
   font-size: 12px;
   letter-spacing: 0.08em;
   color: #0a0c10;
-  background: var(--accent-2);
+  background: #d9a441;
   padding: 7px 10px;
   display: none;
 }
@@ -530,7 +485,7 @@ button.secondary {
 <!-- MENU OVERLAY -->
 <div id="overlay">
   <div class="menu-container">
-    <h1>FPVSIM.ArhanFPV</h1>
+    <h1>FPV FLIGHT SIM</h1>
     <p>5" Freestyle Quad · Acro Mode</p>
 
     <div style="display:flex; gap:8px; margin-bottom:12px;">
@@ -550,18 +505,18 @@ button.secondary {
         <h3>Flight Rates (Max Rate)</h3>
         <div class="setting-row">
           <label>Roll</label>
-          <input type="range" id="rate-roll" min="40" max="1000" value="450">
-          <span class="setting-val" id="val-roll">450°/s</span>
+          <input type="range" id="rate-roll" min="40" max="1000" value="300">
+          <span class="setting-val" id="val-roll">300°/s</span>
         </div>
         <div class="setting-row">
           <label>Pitch</label>
-          <input type="range" id="rate-pitch" min="40" max="1000" value="450">
-          <span class="setting-val" id="val-pitch">450°/s</span>
+          <input type="range" id="rate-pitch" min="40" max="1000" value="300">
+          <span class="setting-val" id="val-pitch">300°/s</span>
         </div>
         <div class="setting-row">
           <label>Yaw</label>
-          <input type="range" id="rate-yaw" min="30" max="1000" value="450">
-          <span class="setting-val" id="val-yaw">450°/s</span>
+          <input type="range" id="rate-yaw" min="30" max="800" value="200">
+          <span class="setting-val" id="val-yaw">200°/s</span>
         </div>
       </div>
       <div class="settings-group">
@@ -581,21 +536,13 @@ button.secondary {
         <h3>Expo</h3>
         <div class="setting-row">
           <label>Roll/Pitch</label>
-          <input type="range" id="expo-rp" min="0" max="100" value="40" data-scale="100">
+          <input type="range" id="expo-rp" min="0" max="100" value="40">
           <span class="setting-val" id="val-expo-rp">0.40</span>
         </div>
         <div class="setting-row">
           <label>Yaw</label>
-          <input type="range" id="expo-yaw" min="0" max="100" value="50" data-scale="100">
+          <input type="range" id="expo-yaw" min="0" max="100" value="50">
           <span class="setting-val" id="val-expo-yaw">0.50</span>
-        </div>
-      </div>
-      <div class="settings-group">
-        <h3>Momentum</h3>
-        <div class="setting-row">
-          <label>Glide</label>
-          <input type="range" id="momentum" min="0" max="100" value="50">
-          <span class="setting-val" id="val-momentum">50%</span>
         </div>
       </div>
       <div class="settings-group">
@@ -609,14 +556,6 @@ button.secondary {
     </div>
 
     <div class="tab-panel" id="tab-camera">
-      <div class="settings-group">
-        <h3>Color Theme</h3>
-        <div class="setting-row">
-          <label>Color</label>
-          <input type="range" id="theme-hue" min="0" max="360" value="39">
-          <span class="setting-val" id="val-theme"><span class="theme-swatch"></span>39°</span>
-        </div>
-      </div>
       <div class="settings-group">
         <h3>FPV Camera</h3>
         <div class="setting-row">
@@ -776,7 +715,7 @@ button.secondary {
     <div id="calib-sub"></div>
     <p id="calib-desc"></p>
     <div id="calib-readout"></div>
-    <div id="calib-hint" style="color:var(--accent-2); font-size:11px; margin-top:8px; min-height:14px;"></div>
+    <div id="calib-hint" style="color:#d9a441; font-size:11px; margin-top:8px; min-height:14px;"></div>
     <div style="margin-top:14px;">
       <button id="calib-next" onclick="calibNext()">Next</button>
       <button class="secondary" onclick="cancelCalibration()">Cancel</button>
@@ -799,15 +738,13 @@ button.secondary {
    CONFIG / STATE
    ========================================================= */
 const config = {
-  rateRoll: 450, ratePitch: 450, rateYaw: 450,
+  rateRoll: 300, ratePitch: 300, rateYaw: 200,
   centerRP: 45, centerYaw: 35,
   expoRP: 0.40, expoYaw: 0.50,
   camAngle: 30, camFov: 115,
   stickSize: 1.0, stickOpacity: 1.0, stickDeadzone: 0.08,
   rateSmooth: 0.13,   // seconds — low-pass on commanded rates for the touch sticks
   remoteSmooth: 0.05, // seconds — lighter low-pass for the physical controller
-  momentum: 0.5,    // 0..1 — how far the quad glides (0 = heavy air drag, 1 = almost none)
-  themeHue: 39,     // 0..360 — accent colour of the whole UI (39 = original gold)
   propwash: 0.05,   // 0..1 — turbulence when descending through your own prop wake
   inputMode: 'touch', // 'touch' = on-screen sticks; 'remote' = gamepad / USB radio
   map: 'jungle',    // 'jungle' = neighbourhood/jungle; 'city' = downtown skyscrapers
@@ -1517,13 +1454,6 @@ const craft = {
   battFull: 25.2,    // 4.20 V/cell
   battEmpty: 19.8,   // 3.30 V/cell
   sag: 1.8,          // volts of droop at full throttle under load
-  // Touchdown state (see groundContact): grounded = resting on a surface,
-  // level = seconds left of self-levelling after a gentle landing,
-  // flipping = landed > 45 deg tilted and is tipping onto its back.
-  grounded: false,
-  level: 0,
-  flipping: false,
-  flipHold: 0,
 };
 
 /* ---- Quaternion helpers (q = [w,x,y,z], body->world, kept normalized) ---- */
@@ -1561,43 +1491,9 @@ function integrateBodyRates(q, ox, oy, oz, dt) {
   return quatNormalize(quatMul(q, dq)); // right-multiply: rates are in body frame
 }
 
-// Angle (rad) between the quad's body-up axis and world-up: 0 = flat/upright,
-// PI/2 = on its side, PI = upside down.
-function craftTilt() {
-  const up = quatRotate(craft.q, 0, 1, 0);
-  return Math.acos(Math.max(-1, Math.min(1, up[1])));
-}
-// Rotate the craft about a world-space axis by the shortest arc that carries
-// its body-up axis toward targetUp (0,+1,0 = upright, 0,-1,0 = inverted),
-// covering `frac` of the remaining angle. Returns the angle still left (rad).
-function rotateUpToward(targetY, frac) {
-  const up = quatRotate(craft.q, 0, 1, 0);
-  const dot = Math.max(-1, Math.min(1, up[1] * targetY));
-  const ang = Math.acos(dot);
-  if (ang < 1e-4) return 0;
-  // axis = up x target  (target is (0, targetY, 0))
-  let ax = -up[2] * targetY, ay = 0, az = up[0] * targetY;
-  let m = Math.hypot(ax, az);
-  if (m < 1e-6) { ax = 1; az = 0; m = 1; } // exactly opposite: tip about X
-  ax /= m; az /= m;
-  const a = ang * frac, h = a / 2, sn = Math.sin(h);
-  craft.q = quatNormalize(quatMul([Math.cos(h), ax * sn, ay * sn, az * sn], craft.q));
-  return ang - a;
-}
-// Called every frame the craft is touching the ground/roof. The first frame of
-// contact decides the outcome from the landing tilt:
-//   <= 45 deg -> the quad settles flat (0 deg) on its landing gear
-//   >  45 deg -> it tips over 180 deg onto its back and stays inverted
-function groundContact(wasGrounded) {
-  craft.grounded = true;
-  if (wasGrounded || craft.flipping) return;
-  if (craftTilt() > Math.PI / 4) { craft.flipping = true; craft.flipHold = 0; craft.level = 0; }
-  else craft.level = 0.6;
-}
-
 const phys = {
   gravity: 9.81,
-  dragLin: 0.0316, // quadratic-ish air drag coefficient; set by the Momentum slider (applyMomentum)
+  dragLin: 0.10,   // quadratic-ish air drag coefficient
   groundY: 0.12,
 };
 
@@ -1807,10 +1703,10 @@ function buildCity() {
       }
     }
   }
-  // A colossal 1000 m landmark — a single uniform-width prism (no setback
-  // ledges), flat roof on top.
+  // A 500 m landmark — a single uniform-width prism (no setback ledges),
+  // flat roof on top.
   const mega = {
-    x: 34, z: 145, w: 46, d: 46, h: 1000,
+    x: 34, z: 145, w: 46, d: 46, h: 500,
     glass: true, color: 0x93aec6, shape: 'box', tiers: 1, antenna: true, litSeed: 7, mega: true,
   };
   // Clear a plaza around its base so nothing overlaps the tower (or the portal).
@@ -1819,13 +1715,14 @@ function buildCity() {
   // A hot-air balloon drifting among the towers (a nod to the reference).
   world.balloon = { x: 6, y: 66, z: 96, r: 5 };
   // Two portals on the tower's avenue-facing side:
-  //  • base (purple) → warps up to the roof deck
-  //  • 500 m (green)  → warps back down to the ground
+  //  • base (purple)   → warps up to the roof
+  //  • up high (green) → warps back down to the ground. Kept just under the
+  //    roofline so it sits on the facade rather than clipping the roof slab.
   const px = mega.x - mega.w / 2 - 2.6;
   world.portals = [
     { x: px, z: mega.z, y: 3.4, r: 2.6, rot: Math.PI / 2, color: 0xc26bff, emis: 0x9a2bff,
       dest: [mega.x, mega.h + 5, mega.z], msg: '⚡ WARPED TO THE TOP' },
-    { x: px, z: mega.z, y: 500, r: 2.6, rot: Math.PI / 2, color: 0x5cff9a, emis: 0x1ecb6a,
+    { x: px, z: mega.z, y: mega.h - 12, r: 2.6, rot: Math.PI / 2, color: 0x5cff9a, emis: 0x1ecb6a,
       dest: [mega.x - mega.w / 2 - 7, 3.5, mega.z], msg: '⚡ WARPED TO THE BOTTOM' },
   ];
   addRaceGates();
@@ -2242,28 +2139,7 @@ function buildCity3D(scene) {
         by += tierH; cw *= setback; cd *= setback;
       }
     }
-    // Mega tower: a wide flat rooftop deck (a proper landing pad) that
-    // overhangs the tower, with its own collider so you can perch on the whole
-    // platform. A painted ring marks the pad.
-    if (t.mega) {
-      const deckW = t.w * 1.6, deckH = 1.6;
-      const deck = new THREE.Mesh(unit, new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.9 }));
-      deck.scale.set(deckW, deckH, deckW); deck.position.y = by + deckH / 2;
-      deck.castShadow = true; deck.receiveShadow = true; g.add(deck);
-      // Low parapet rail around the edge.
-      const railMat = new THREE.MeshStandardMaterial({ color: 0x6a7078, roughness: 0.85 });
-      [[deckW / 2, 0, 0.4, deckW], [-deckW / 2, 0, 0.4, deckW], [0, deckW / 2, deckW, 0.4], [0, -deckW / 2, deckW, 0.4]].forEach(([lx, lz, sx, sz]) => {
-        const rail = new THREE.Mesh(unit, railMat);
-        rail.scale.set(sx, 1.1, sz); rail.position.set(lx, by + deckH + 0.55, lz); g.add(rail);
-      });
-      // Helipad ring marking.
-      const pad = new THREE.Mesh(new THREE.RingGeometry(deckW * 0.24, deckW * 0.3, 32),
-        new THREE.MeshStandardMaterial({ color: 0xf0d24a, roughness: 0.8, side: THREE.DoubleSide }));
-      pad.rotation.x = -Math.PI / 2; pad.position.y = by + deckH + 0.02; g.add(pad);
-      t.colliders.push({ x0: t.x - deckW / 2, x1: t.x + deckW / 2, z0: t.z - deckW / 2, z1: t.z + deckW / 2, y0: by, y1: by + deckH });
-      by += deckH;
-    }
-    // Rooftop clutter (not on the mega tower's helipad).
+    // Rooftop clutter (the mega tower's roof stays clear to land on).
     for (let i = 0; !t.mega && i < 1 + (Math.floor(t.litSeed) % 3); i++) {
       const ac = new THREE.Mesh(unit, acMat);
       const s2 = 0.7 + Math.random() * 1.1; ac.scale.set(s2, 0.5 + Math.random() * 0.7, s2);
@@ -2811,10 +2687,9 @@ function renderWorld() {
   world.gates.forEach((g, i) => {
     if (!g.mesh) return;
     const passed = i < state.nextGate, active = i === state.nextGate;
-    const th = themeColors();
-    const hex = passed ? 0x39ff6a : active ? 0x5ad1ff : th.aHex;
+    const hex = passed ? 0x39ff6a : active ? 0x5ad1ff : 0xf0c168;
     g.mesh.material.color.setHex(hex);
-    g.mesh.material.emissive.setHex(passed ? 0x1f8f3a : active ? 0x36b6ff : th.bHex);
+    g.mesh.material.emissive.setHex(passed ? 0x1f8f3a : active ? 0x36b6ff : 0xd9a441);
     g.mesh.material.emissiveIntensity = active ? pulse * 1.8 : passed ? 0.9 : 1.0;
     // Number label: tint by state, and enlarge/pulse the active one.
     if (g.label) {
@@ -2934,13 +2809,7 @@ function setupMenu() {
   bindRange('rate-yaw-center', v => { config.centerYaw = v; }, v => v + '°/s', 'val-yaw-center');
   bindRange('expo-rp', v => { config.expoRP = v / 100; }, v => (v / 100).toFixed(2), 'val-expo-rp');
   bindRange('expo-yaw', v => { config.expoYaw = v / 100; }, v => (v / 100).toFixed(2), 'val-expo-yaw');
-  bindRange('momentum', v => { config.momentum = v / 100; applyMomentum(); }, v => v + '%', 'val-momentum');
   bindRange('propwash', v => { config.propwash = v / 100; }, v => v + '%', 'val-propwash');
-
-  bindRange('theme-hue', v => { config.themeHue = v; applyTheme(); },
-    v => '<span class="theme-swatch"></span>' + v + '°', 'val-theme', true);
-  applyTheme();
-  setupTypedValues();
 
   bindRange('cam-angle', v => { config.camAngle = v; }, v => v + '°', 'val-cam');
   bindRange('cam-fov', v => { config.camFov = v; }, v => v + '°', 'val-fov');
@@ -2956,84 +2825,12 @@ function setupMenu() {
   bindRange('remote-smooth', v => { config.remoteSmooth = v / 1000; }, v => v + ' ms', 'val-remote-smooth');
 }
 
-// Momentum slider -> air-drag coefficient (exponential: 0% = 0.10 heavy drag,
-// 50% = ~0.032, 100% = 0.01 long glide).
-function applyMomentum() {
-  phys.dragLin = 0.10 * Math.pow(0.1, config.momentum);
-}
-
-function bindRange(id, apply, format, valId, html) {
+function bindRange(id, apply, format, valId) {
   const el = document.getElementById(id);
   el.addEventListener('input', e => {
     const v = parseFloat(e.target.value);
     apply(v);
-    const out = document.getElementById(valId);
-    if (html) out.innerHTML = format(v); else out.textContent = format(v);
-  });
-}
-
-// Colour theme: one hue drives every accent (buttons, tabs, values, gates).
-function themeColors() {
-  const h = config.themeHue;
-  return { a: `hsl(${h}, 82%, 67%)`, b: `hsl(${h}, 67%, 55%)`,
-           aHex: hslToHex(h, 0.82, 0.67), bHex: hslToHex(h, 0.67, 0.55) };
-}
-function hslToHex(h, s, l) {
-  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
-  const f = n => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))));
-  return (f(0) << 16) | (f(8) << 8) | f(4);
-}
-function applyTheme() {
-  const c = themeColors();
-  const root = document.documentElement.style;
-  root.setProperty('--accent', c.a);
-  root.setProperty('--accent-2', c.b);
-  const hue = document.getElementById('theme-hue');
-  if (hue) hue.style.accentColor = c.a;
-  document.querySelectorAll('.theme-swatch').forEach(el => { el.style.background = c.a; });
-}
-
-// Tap any slider value to type it with the number keyboard; the slider follows.
-function setupTypedValues() {
-  document.querySelectorAll('.setting-row').forEach(row => {
-    const range = row.querySelector('input[type="range"]');
-    const val = row.querySelector('.setting-val');
-    if (!range || !val) return;
-    const scale = parseFloat(range.dataset.scale) || 1;
-    val.classList.add('editable');
-    val.title = 'Tap to type a value';
-    val.addEventListener('click', () => {
-      if (val.querySelector('input')) return;
-      const prevHTML = val.innerHTML;
-      const inp = document.createElement('input');
-      inp.type = 'number';
-      inp.className = 'val-input';
-      inp.inputMode = scale === 1 ? 'numeric' : 'decimal';
-      inp.step = scale === 1 ? '1' : String(1 / scale);
-      inp.min = range.min / scale; inp.max = range.max / scale;
-      inp.value = range.value / scale;
-      val.innerHTML = ''; val.appendChild(inp);
-      inp.focus(); inp.select();
-      let done = false;
-      const finish = ok => {
-        if (done) return; done = true;
-        const n = parseFloat(String(inp.value).replace(',', '.'));
-        if (ok && isFinite(n)) {
-          const v = Math.max(+range.min, Math.min(+range.max, Math.round(n * scale)));
-          range.value = v;
-          range.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-        if (val.contains(inp)) val.innerHTML = prevHTML; // cancelled / unchanged
-      };
-      inp.addEventListener('keydown', e => {
-        e.stopPropagation(); // don't let W/A/S/D, Space, R reach the flight keys
-        if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
-        else if (e.key === 'Escape') { finish(false); }
-      });
-      inp.addEventListener('keyup', e => e.stopPropagation());
-      inp.addEventListener('blur', () => finish(true));
-      inp.addEventListener('click', e => e.stopPropagation());
-    });
+    document.getElementById(valId).textContent = format(v);
   });
 }
 
@@ -3053,7 +2850,6 @@ function startFlight() {
   craft.pos = SPAWN_POS.slice();
   craft.vel = [0, 0, 0];
   craft.q = [1, 0, 0, 0];
-  craft.grounded = false; craft.level = 0; craft.flipping = false; craft.flipHold = 0;
   input.throttle = 0;
   sticks.left.id = null; sticks.left.rawX = 0; sticks.left.rawY = -1; sticks.left.kbActive = false; // throttle at bottom (0%)
   sticks.right.id = null; sticks.right.rawX = 0; sticks.right.rawY = 0; sticks.right.kbActive = false;
@@ -3141,7 +2937,6 @@ function resetCraft() {
   craft.pos = SPAWN_POS.slice();
   craft.vel = [0, 0, 0];
   craft.q = [1, 0, 0, 0];
-  craft.grounded = false; craft.level = 0; craft.flipping = false; craft.flipHold = 0;
   state.crashed = false;
   state.armed = false;
   state.leavingMapWarningSent = false;
@@ -3181,7 +2976,7 @@ function updatePhysics(dt) {
   // is no thrust and no control — but gravity still applies below, so the quad
   // FALLS and lands (ground friction stops any slide; no ghost drift).
   let thrustMag = 0;
-  if (state.armed && !craft.flipping) {
+  if (state.armed) {
     // Input filtering (deadzone + rate smoothing) is ON for the on-screen touch
     // sticks — they need it to feel controllable — but OFF for a physical
     // controller, which is precise and already has its own radio-side filtering.
@@ -3194,9 +2989,9 @@ function updatePhysics(dt) {
     // Acro rate control (WikiFPV): sticks command BODY-frame angular velocity
     // (deg/s -> rad/s). Centered sticks => zero rate => the quad holds attitude.
     // Controller mode flies a hotter freestyle profile: 670°/s max, 0.30 expo.
-    const maxRoll  = config.rateRoll;
-    const maxPitch = config.ratePitch;
-    const maxYaw   = config.rateYaw;
+    const maxRoll  = filtering ? config.rateRoll  : 670;
+    const maxPitch = filtering ? config.ratePitch : 670;
+    const maxYaw   = filtering ? config.rateYaw   : 670;
     const expoRP   = filtering ? config.expoRP    : 0.30;
     const expoYaw  = filtering ? config.expoYaw   : 0.30;
     const rollRate  = rateResponse(rollStick,  config.centerRP,  maxRoll,  expoRP)  * Math.PI / 180;
@@ -3267,15 +3062,12 @@ function updatePhysics(dt) {
 
   // Ground collision — only a genuinely hard hit (> 7 G) crashes. Anything
   // softer just touches down, so normal landings never throw the warning.
-  const wasGrounded = craft.grounded;
-  craft.grounded = false;
   if (craft.pos[1] <= phys.groundY) {
     const impactG = Math.hypot(v[0], v[1], v[2]) / 9.81;
     if (impactG > 7) {
       triggerCrash(`Impact: ${impactG.toFixed(1)}G — Too hard!`);
       return;
     } else {
-      groundContact(wasGrounded);
       craft.pos[1] = phys.groundY;
       v[1] = Math.max(0, v[1]);
       v[0] *= 0.85; v[2] *= 0.85; // ground friction
@@ -3345,7 +3137,6 @@ function updatePhysics(dt) {
       if (prevPos[1] >= c.y1 - 0.03) {
         const impactG = Math.hypot(v[0], v[1], v[2]) / 9.81;
         if (impactG > 7) { triggerCrash(`Impact: ${impactG.toFixed(1)}G — Too hard!`); return; }
-        groundContact(wasGrounded);
         craft.pos[1] = c.y1 + 0.001;
         v[1] = Math.max(0, v[1]);
         v[0] *= 0.85; v[2] *= 0.85; // rooftop friction, like the ground
@@ -3360,23 +3151,6 @@ function updatePhysics(dt) {
     if (Math.hypot(cx - bl.x, cy - (bl.y + bl.r * 1.2), cz - bl.z) < bl.r * 1.15 + CR) {
       triggerCrash('Hit the balloon!'); return;
     }
-  }
-
-  // Touchdown attitude: flip onto the back, or self-level flat on the ground.
-  if (craft.grounded) {
-    if (craft.flipping) {
-      const left = rotateUpToward(-1, 1 - Math.exp(-dt / 0.10));
-      v[0] *= 0.8; v[2] *= 0.8;
-      if (left < 0.03) {
-        craft.flipHold += dt;
-        if (craft.flipHold > 0.5) { triggerCrash('Flipped over! Landed upside down.'); return; }
-      }
-    } else if (craft.level > 0) {
-      craft.level -= dt;
-      rotateUpToward(1, 1 - Math.exp(-dt / 0.08));
-    }
-  } else {
-    craft.level = 0;
   }
   // Portals: fly through one to warp to its destination.
   if (world.portals) {
