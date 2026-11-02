@@ -1460,6 +1460,13 @@ const craft = {
   battFull: 25.2,    // 4.20 V/cell
   battEmpty: 19.8,   // 3.30 V/cell
   sag: 1.8,          // volts of droop at full throttle under load
+  // Touchdown state (see groundContact): grounded = resting on a surface,
+  // level = seconds left of self-levelling after a gentle landing,
+  // flipping = landed >= 90 deg tilted and is tipping onto its back.
+  grounded: false,
+  level: 0,
+  flipping: false,
+  flipHold: 0,
 };
 
 /* ---- Quaternion helpers (q = [w,x,y,z], body->world, kept normalized) ---- */
@@ -1495,6 +1502,40 @@ function integrateBodyRates(q, ox, oy, oz, dt) {
   const s = Math.sin(half) / mag;      // axis * sin(half) == omega * s
   const dq = [Math.cos(half), ox*s, oy*s, oz*s];
   return quatNormalize(quatMul(q, dq)); // right-multiply: rates are in body frame
+}
+
+// Angle (rad) between the quad's body-up axis and world-up: 0 = flat/upright,
+// PI/2 = on its side, PI = upside down.
+function craftTilt() {
+  const up = quatRotate(craft.q, 0, 1, 0);
+  return Math.acos(Math.max(-1, Math.min(1, up[1])));
+}
+// Rotate the craft about a world-space axis by the shortest arc that carries
+// its body-up axis toward targetUp (0,+1,0 = upright, 0,-1,0 = inverted),
+// covering `frac` of the remaining angle. Returns the angle still left (rad).
+function rotateUpToward(targetY, frac) {
+  const up = quatRotate(craft.q, 0, 1, 0);
+  const dot = Math.max(-1, Math.min(1, up[1] * targetY));
+  const ang = Math.acos(dot);
+  if (ang < 1e-4) return 0;
+  // axis = up x target  (target is (0, targetY, 0))
+  let ax = -up[2] * targetY, ay = 0, az = up[0] * targetY;
+  let m = Math.hypot(ax, az);
+  if (m < 1e-6) { ax = 1; az = 0; m = 1; } // exactly opposite: tip about X
+  ax /= m; az /= m;
+  const a = ang * frac, h = a / 2, sn = Math.sin(h);
+  craft.q = quatNormalize(quatMul([Math.cos(h), ax * sn, ay * sn, az * sn], craft.q));
+  return ang - a;
+}
+// Called every frame the craft is touching the ground/roof. The first frame of
+// contact decides the outcome from the landing tilt:
+//   < 90 deg  -> the quad settles flat (0 deg) on its landing gear
+//   >= 90 deg -> it tips over onto its back and stays inverted
+function groundContact(wasGrounded) {
+  craft.grounded = true;
+  if (wasGrounded || craft.flipping) return;
+  if (craftTilt() >= Math.PI / 2) { craft.flipping = true; craft.flipHold = 0; craft.level = 0; }
+  else craft.level = 0.6;
 }
 
 const phys = {
@@ -2876,6 +2917,7 @@ function startFlight() {
   craft.pos = SPAWN_POS.slice();
   craft.vel = [0, 0, 0];
   craft.q = [1, 0, 0, 0];
+  craft.grounded = false; craft.level = 0; craft.flipping = false; craft.flipHold = 0;
   input.throttle = 0;
   sticks.left.id = null; sticks.left.rawX = 0; sticks.left.rawY = -1; sticks.left.kbActive = false; // throttle at bottom (0%)
   sticks.right.id = null; sticks.right.rawX = 0; sticks.right.rawY = 0; sticks.right.kbActive = false;
@@ -2963,6 +3005,7 @@ function resetCraft() {
   craft.pos = SPAWN_POS.slice();
   craft.vel = [0, 0, 0];
   craft.q = [1, 0, 0, 0];
+  craft.grounded = false; craft.level = 0; craft.flipping = false; craft.flipHold = 0;
   state.crashed = false;
   state.armed = false;
   state.leavingMapWarningSent = false;
@@ -3002,7 +3045,7 @@ function updatePhysics(dt) {
   // is no thrust and no control — but gravity still applies below, so the quad
   // FALLS and lands (ground friction stops any slide; no ghost drift).
   let thrustMag = 0;
-  if (state.armed) {
+  if (state.armed && !craft.flipping) {
     // Input filtering (deadzone + rate smoothing) is ON for the on-screen touch
     // sticks — they need it to feel controllable — but OFF for a physical
     // controller, which is precise and already has its own radio-side filtering.
@@ -3088,12 +3131,15 @@ function updatePhysics(dt) {
 
   // Ground collision — only a genuinely hard hit (> 7 G) crashes. Anything
   // softer just touches down, so normal landings never throw the warning.
+  const wasGrounded = craft.grounded;
+  craft.grounded = false;
   if (craft.pos[1] <= phys.groundY) {
     const impactG = Math.hypot(v[0], v[1], v[2]) / 9.81;
     if (impactG > 7) {
       triggerCrash(`Impact: ${impactG.toFixed(1)}G — Too hard!`);
       return;
     } else {
+      groundContact(wasGrounded);
       craft.pos[1] = phys.groundY;
       v[1] = Math.max(0, v[1]);
       v[0] *= 0.85; v[2] *= 0.85; // ground friction
@@ -3163,6 +3209,7 @@ function updatePhysics(dt) {
       if (prevPos[1] >= c.y1 - 0.03) {
         const impactG = Math.hypot(v[0], v[1], v[2]) / 9.81;
         if (impactG > 7) { triggerCrash(`Impact: ${impactG.toFixed(1)}G — Too hard!`); return; }
+        groundContact(wasGrounded);
         craft.pos[1] = c.y1 + 0.001;
         v[1] = Math.max(0, v[1]);
         v[0] *= 0.85; v[2] *= 0.85; // rooftop friction, like the ground
@@ -3177,6 +3224,23 @@ function updatePhysics(dt) {
     if (Math.hypot(cx - bl.x, cy - (bl.y + bl.r * 1.2), cz - bl.z) < bl.r * 1.15 + CR) {
       triggerCrash('Hit the balloon!'); return;
     }
+  }
+
+  // Touchdown attitude: flip onto the back, or self-level flat on the ground.
+  if (craft.grounded) {
+    if (craft.flipping) {
+      const left = rotateUpToward(-1, 1 - Math.exp(-dt / 0.10));
+      v[0] *= 0.8; v[2] *= 0.8;
+      if (left < 0.03) {
+        craft.flipHold += dt;
+        if (craft.flipHold > 0.5) { triggerCrash('Flipped over! Landed upside down.'); return; }
+      }
+    } else if (craft.level > 0) {
+      craft.level -= dt;
+      rotateUpToward(1, 1 - Math.exp(-dt / 0.08));
+    }
+  } else {
+    craft.level = 0;
   }
   // Portals: fly through one to warp to its destination.
   if (world.portals) {
