@@ -14,6 +14,7 @@
 <meta name="twitter:card" content="summary">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
+:root { --accent: #f0c168; --accent-2: #d9a441; }
 html, body {
   width: 100%;
   height: 100%;
@@ -61,7 +62,7 @@ canvas { display: block; width: 100%; height: 100%; }
   font-size: 28px;
   margin-bottom: 10px;
   letter-spacing: 0.1em;
-  color: #f0c168;
+  color: var(--accent);
 }
 .menu-container p {
   font-size: 13px;
@@ -97,18 +98,56 @@ canvas { display: block; width: 100%; height: 100%; }
   flex: 1;
   margin: 0 10px;
   height: 5px;
-  accent-color: #d9a441;
+  accent-color: var(--accent-2);
 }
 .setting-val {
   font-family: 'Share Tech Mono', monospace;
-  color: #d9a441;
+  color: var(--accent-2);
   min-width: 55px;
   text-align: right;
   font-size: 12px;
 }
+/* Tap a value to type it with the number keyboard. */
+.setting-val.editable {
+  cursor: pointer;
+  border-bottom: 1px dashed currentColor;
+  padding: 2px 0;
+}
+.setting-val .val-input {
+  width: 64px;
+  font: inherit;
+  font-size: 16px; /* >=16px stops iOS zooming in on focus */
+  color: #e9edf3;
+  background: #12151b;
+  border: 1px solid var(--accent-2);
+  border-radius: 4px;
+  padding: 2px 4px;
+  text-align: right;
+}
+.theme-swatch {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--accent); margin-right: 6px; vertical-align: -2px;
+  border: 1px solid rgba(255,255,255,0.4);
+}
+#theme-hue {
+  -webkit-appearance: none; appearance: none;
+  height: 8px !important;
+  accent-color: var(--accent);
+  background: linear-gradient(90deg, hsl(0,80%,60%), hsl(60,80%,60%), hsl(120,80%,60%), hsl(180,80%,60%), hsl(240,80%,60%), hsl(300,80%,60%), hsl(360,80%,60%));
+  border-radius: 3px;
+}
+#theme-hue::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent); border: 2px solid #fff; cursor: pointer;
+}
+#theme-hue::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--accent); border: 2px solid #fff; cursor: pointer;
+}
 
 button {
-  background: linear-gradient(180deg, #f0c168, #d9a441);
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
   color: #0a0c10;
   border: none;
   border-radius: 6px;
@@ -221,7 +260,7 @@ button.secondary {
   font-size: 22px;
   font-weight: bold;
   letter-spacing: 0.1em;
-  color: #f0c168;
+  color: var(--accent);
   text-shadow: 0 0 12px rgba(240, 193, 104, 0.8);
   opacity: 0;
 }
@@ -296,7 +335,7 @@ button.secondary {
   top: 50%;
   margin: -56px 0 0 -56px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #f0c168, #d9a441);
+  background: radial-gradient(circle at 35% 30%, var(--accent), var(--accent-2));
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
   pointer-events: none;
   transform: translate(0px, 0px);
@@ -393,18 +432,18 @@ button.secondary {
 .map-row span { flex: 0 0 70px; }
 .map-row select { background: #12151b; color: #e9edf3; border: 1px solid #2c313b; border-radius: 5px; padding: 5px; flex: 1; }
 .map-row label { color: #8d96a6; font-size: 12px; display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
-.map-row .mini { flex: 0 0 auto; margin: 0; padding: 5px 9px; font-size: 11px; background: #1d212a; color: #f0c168; border: 1px solid #5b6577; border-radius: 5px; }
+.map-row .mini { flex: 0 0 auto; margin: 0; padding: 5px 9px; font-size: 11px; background: #1d212a; color: var(--accent); border: 1px solid #5b6577; border-radius: 5px; }
 .map-row select { flex: 1 1 auto; min-width: 0; }
 .calib-card {
   background: #1d212a;
-  border: 1px solid #d9a441;
+  border: 1px solid var(--accent-2);
   border-radius: 10px;
   padding: 22px 24px;
   max-width: 460px;
   width: 92%;
   text-align: center;
 }
-.calib-card h2 { color: #f0c168; font-size: 16px; letter-spacing: 0.08em; }
+.calib-card h2 { color: var(--accent); font-size: 16px; letter-spacing: 0.08em; }
 #calib-sub { color: #5ad1e6; font-size: 15px; font-weight: bold; margin: 10px 0 6px; }
 .calib-card p { color: #e9edf3; font-size: 13px; line-height: 1.5; margin-bottom: 12px; }
 #calib-readout {
@@ -433,7 +472,7 @@ button.secondary {
   padding: 1px 6px;
   font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
-  color: #f0c168;
+  color: var(--accent);
 }
 
 .tabs { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; justify-content: center; }
@@ -447,7 +486,7 @@ button.secondary {
   letter-spacing: 0.05em;
   margin: 0;
 }
-.tab-btn.active { color: #f0c168; border-color: #d9a441; }
+.tab-btn.active { color: var(--accent); border-color: var(--accent-2); }
 .mode-btn {
   flex: 1;
   background: #1d212a;
@@ -460,8 +499,8 @@ button.secondary {
 }
 .mode-btn.active {
   color: #0a0c10;
-  background: linear-gradient(180deg, #f0c168, #d9a441);
-  border-color: #d9a441;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  border-color: var(--accent-2);
 }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
@@ -474,7 +513,7 @@ button.secondary {
   font-size: 12px;
   letter-spacing: 0.08em;
   color: #0a0c10;
-  background: #d9a441;
+  background: var(--accent-2);
   padding: 7px 10px;
   display: none;
 }
@@ -511,18 +550,18 @@ button.secondary {
         <h3>Flight Rates (Max Rate)</h3>
         <div class="setting-row">
           <label>Roll</label>
-          <input type="range" id="rate-roll" min="40" max="1000" value="300">
-          <span class="setting-val" id="val-roll">300°/s</span>
+          <input type="range" id="rate-roll" min="40" max="1000" value="450">
+          <span class="setting-val" id="val-roll">450°/s</span>
         </div>
         <div class="setting-row">
           <label>Pitch</label>
-          <input type="range" id="rate-pitch" min="40" max="1000" value="300">
-          <span class="setting-val" id="val-pitch">300°/s</span>
+          <input type="range" id="rate-pitch" min="40" max="1000" value="450">
+          <span class="setting-val" id="val-pitch">450°/s</span>
         </div>
         <div class="setting-row">
           <label>Yaw</label>
-          <input type="range" id="rate-yaw" min="30" max="800" value="200">
-          <span class="setting-val" id="val-yaw">200°/s</span>
+          <input type="range" id="rate-yaw" min="30" max="1000" value="450">
+          <span class="setting-val" id="val-yaw">450°/s</span>
         </div>
       </div>
       <div class="settings-group">
@@ -542,12 +581,12 @@ button.secondary {
         <h3>Expo</h3>
         <div class="setting-row">
           <label>Roll/Pitch</label>
-          <input type="range" id="expo-rp" min="0" max="100" value="40">
+          <input type="range" id="expo-rp" min="0" max="100" value="40" data-scale="100">
           <span class="setting-val" id="val-expo-rp">0.40</span>
         </div>
         <div class="setting-row">
           <label>Yaw</label>
-          <input type="range" id="expo-yaw" min="0" max="100" value="50">
+          <input type="range" id="expo-yaw" min="0" max="100" value="50" data-scale="100">
           <span class="setting-val" id="val-expo-yaw">0.50</span>
         </div>
       </div>
@@ -570,6 +609,14 @@ button.secondary {
     </div>
 
     <div class="tab-panel" id="tab-camera">
+      <div class="settings-group">
+        <h3>Color Theme</h3>
+        <div class="setting-row">
+          <label>Color</label>
+          <input type="range" id="theme-hue" min="0" max="360" value="39">
+          <span class="setting-val" id="val-theme"><span class="theme-swatch"></span>39°</span>
+        </div>
+      </div>
       <div class="settings-group">
         <h3>FPV Camera</h3>
         <div class="setting-row">
@@ -729,7 +776,7 @@ button.secondary {
     <div id="calib-sub"></div>
     <p id="calib-desc"></p>
     <div id="calib-readout"></div>
-    <div id="calib-hint" style="color:#d9a441; font-size:11px; margin-top:8px; min-height:14px;"></div>
+    <div id="calib-hint" style="color:var(--accent-2); font-size:11px; margin-top:8px; min-height:14px;"></div>
     <div style="margin-top:14px;">
       <button id="calib-next" onclick="calibNext()">Next</button>
       <button class="secondary" onclick="cancelCalibration()">Cancel</button>
@@ -752,7 +799,7 @@ button.secondary {
    CONFIG / STATE
    ========================================================= */
 const config = {
-  rateRoll: 300, ratePitch: 300, rateYaw: 200,
+  rateRoll: 450, ratePitch: 450, rateYaw: 450,
   centerRP: 45, centerYaw: 35,
   expoRP: 0.40, expoYaw: 0.50,
   camAngle: 30, camFov: 115,
@@ -760,6 +807,7 @@ const config = {
   rateSmooth: 0.13,   // seconds — low-pass on commanded rates for the touch sticks
   remoteSmooth: 0.05, // seconds — lighter low-pass for the physical controller
   momentum: 0.5,    // 0..1 — how far the quad glides (0 = heavy air drag, 1 = almost none)
+  themeHue: 39,     // 0..360 — accent colour of the whole UI (39 = original gold)
   propwash: 0.05,   // 0..1 — turbulence when descending through your own prop wake
   inputMode: 'touch', // 'touch' = on-screen sticks; 'remote' = gamepad / USB radio
   map: 'jungle',    // 'jungle' = neighbourhood/jungle; 'city' = downtown skyscrapers
@@ -1471,7 +1519,7 @@ const craft = {
   sag: 1.8,          // volts of droop at full throttle under load
   // Touchdown state (see groundContact): grounded = resting on a surface,
   // level = seconds left of self-levelling after a gentle landing,
-  // flipping = landed >= 90 deg tilted and is tipping onto its back.
+  // flipping = landed > 45 deg tilted and is tipping onto its back.
   grounded: false,
   level: 0,
   flipping: false,
@@ -1538,12 +1586,12 @@ function rotateUpToward(targetY, frac) {
 }
 // Called every frame the craft is touching the ground/roof. The first frame of
 // contact decides the outcome from the landing tilt:
-//   < 90 deg  -> the quad settles flat (0 deg) on its landing gear
-//   >= 90 deg -> it tips over onto its back and stays inverted
+//   <= 45 deg -> the quad settles flat (0 deg) on its landing gear
+//   >  45 deg -> it tips over 180 deg onto its back and stays inverted
 function groundContact(wasGrounded) {
   craft.grounded = true;
   if (wasGrounded || craft.flipping) return;
-  if (craftTilt() >= Math.PI / 2) { craft.flipping = true; craft.flipHold = 0; craft.level = 0; }
+  if (craftTilt() > Math.PI / 4) { craft.flipping = true; craft.flipHold = 0; craft.level = 0; }
   else craft.level = 0.6;
 }
 
@@ -2763,9 +2811,10 @@ function renderWorld() {
   world.gates.forEach((g, i) => {
     if (!g.mesh) return;
     const passed = i < state.nextGate, active = i === state.nextGate;
-    const hex = passed ? 0x39ff6a : active ? 0x5ad1ff : 0xf0c168;
+    const th = themeColors();
+    const hex = passed ? 0x39ff6a : active ? 0x5ad1ff : th.aHex;
     g.mesh.material.color.setHex(hex);
-    g.mesh.material.emissive.setHex(passed ? 0x1f8f3a : active ? 0x36b6ff : 0xd9a441);
+    g.mesh.material.emissive.setHex(passed ? 0x1f8f3a : active ? 0x36b6ff : th.bHex);
     g.mesh.material.emissiveIntensity = active ? pulse * 1.8 : passed ? 0.9 : 1.0;
     // Number label: tint by state, and enlarge/pulse the active one.
     if (g.label) {
@@ -2888,6 +2937,11 @@ function setupMenu() {
   bindRange('momentum', v => { config.momentum = v / 100; applyMomentum(); }, v => v + '%', 'val-momentum');
   bindRange('propwash', v => { config.propwash = v / 100; }, v => v + '%', 'val-propwash');
 
+  bindRange('theme-hue', v => { config.themeHue = v; applyTheme(); },
+    v => '<span class="theme-swatch"></span>' + v + '°', 'val-theme', true);
+  applyTheme();
+  setupTypedValues();
+
   bindRange('cam-angle', v => { config.camAngle = v; }, v => v + '°', 'val-cam');
   bindRange('cam-fov', v => { config.camFov = v; }, v => v + '°', 'val-fov');
 
@@ -2908,12 +2962,78 @@ function applyMomentum() {
   phys.dragLin = 0.10 * Math.pow(0.1, config.momentum);
 }
 
-function bindRange(id, apply, format, valId) {
+function bindRange(id, apply, format, valId, html) {
   const el = document.getElementById(id);
   el.addEventListener('input', e => {
     const v = parseFloat(e.target.value);
     apply(v);
-    document.getElementById(valId).textContent = format(v);
+    const out = document.getElementById(valId);
+    if (html) out.innerHTML = format(v); else out.textContent = format(v);
+  });
+}
+
+// Colour theme: one hue drives every accent (buttons, tabs, values, gates).
+function themeColors() {
+  const h = config.themeHue;
+  return { a: `hsl(${h}, 82%, 67%)`, b: `hsl(${h}, 67%, 55%)`,
+           aHex: hslToHex(h, 0.82, 0.67), bHex: hslToHex(h, 0.67, 0.55) };
+}
+function hslToHex(h, s, l) {
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))));
+  return (f(0) << 16) | (f(8) << 8) | f(4);
+}
+function applyTheme() {
+  const c = themeColors();
+  const root = document.documentElement.style;
+  root.setProperty('--accent', c.a);
+  root.setProperty('--accent-2', c.b);
+  const hue = document.getElementById('theme-hue');
+  if (hue) hue.style.accentColor = c.a;
+  document.querySelectorAll('.theme-swatch').forEach(el => { el.style.background = c.a; });
+}
+
+// Tap any slider value to type it with the number keyboard; the slider follows.
+function setupTypedValues() {
+  document.querySelectorAll('.setting-row').forEach(row => {
+    const range = row.querySelector('input[type="range"]');
+    const val = row.querySelector('.setting-val');
+    if (!range || !val) return;
+    const scale = parseFloat(range.dataset.scale) || 1;
+    val.classList.add('editable');
+    val.title = 'Tap to type a value';
+    val.addEventListener('click', () => {
+      if (val.querySelector('input')) return;
+      const prevHTML = val.innerHTML;
+      const inp = document.createElement('input');
+      inp.type = 'number';
+      inp.className = 'val-input';
+      inp.inputMode = scale === 1 ? 'numeric' : 'decimal';
+      inp.step = scale === 1 ? '1' : String(1 / scale);
+      inp.min = range.min / scale; inp.max = range.max / scale;
+      inp.value = range.value / scale;
+      val.innerHTML = ''; val.appendChild(inp);
+      inp.focus(); inp.select();
+      let done = false;
+      const finish = ok => {
+        if (done) return; done = true;
+        const n = parseFloat(String(inp.value).replace(',', '.'));
+        if (ok && isFinite(n)) {
+          const v = Math.max(+range.min, Math.min(+range.max, Math.round(n * scale)));
+          range.value = v;
+          range.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (val.contains(inp)) val.innerHTML = prevHTML; // cancelled / unchanged
+      };
+      inp.addEventListener('keydown', e => {
+        e.stopPropagation(); // don't let W/A/S/D, Space, R reach the flight keys
+        if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+        else if (e.key === 'Escape') { finish(false); }
+      });
+      inp.addEventListener('keyup', e => e.stopPropagation());
+      inp.addEventListener('blur', () => finish(true));
+      inp.addEventListener('click', e => e.stopPropagation());
+    });
   });
 }
 
@@ -3074,9 +3194,9 @@ function updatePhysics(dt) {
     // Acro rate control (WikiFPV): sticks command BODY-frame angular velocity
     // (deg/s -> rad/s). Centered sticks => zero rate => the quad holds attitude.
     // Controller mode flies a hotter freestyle profile: 670°/s max, 0.30 expo.
-    const maxRoll  = filtering ? config.rateRoll  : 670;
-    const maxPitch = filtering ? config.ratePitch : 670;
-    const maxYaw   = filtering ? config.rateYaw   : 670;
+    const maxRoll  = config.rateRoll;
+    const maxPitch = config.ratePitch;
+    const maxYaw   = config.rateYaw;
     const expoRP   = filtering ? config.expoRP    : 0.30;
     const expoYaw  = filtering ? config.expoYaw   : 0.30;
     const rollRate  = rateResponse(rollStick,  config.centerRP,  maxRoll,  expoRP)  * Math.PI / 180;
