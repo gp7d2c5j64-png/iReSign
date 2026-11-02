@@ -2722,10 +2722,10 @@ function buildCity() {
       }
     }
   }
-  // A colossal 1000 m landmark — a single uniform-width prism (no setback
-  // ledges), flat roof on top.
+  // A 500 m landmark — a single uniform-width prism (no setback ledges),
+  // flat roof on top.
   const mega = {
-    x: 34, z: 145, w: 46, d: 46, h: 1000,
+    x: 34, z: 145, w: 46, d: 46, h: 500,
     glass: true, color: 0x93aec6, shape: 'box', tiers: 1, antenna: true, litSeed: 7, mega: true,
   };
   // Clear a plaza around its base so nothing overlaps the tower (or the portal).
@@ -2733,16 +2733,24 @@ function buildCity() {
   world.towers.push(mega);
   // A hot-air balloon drifting among the towers (a nod to the reference).
   world.balloon = { x: 6, y: 66, z: 96, r: 5 };
-  // Two portals on the tower's avenue-facing side:
-  //  • base (purple) → warps up to the roof deck
-  //  • 500 m (green)  → warps back down to the ground
-  const px = mega.x - mega.w / 2 - 2.6;
+  // Portals on the landmark tower:
+  //  • base, avenue side (purple) → warps up to the roof
+  //  • 250 m on EVERY face (green) → warps back down to the ground by the
+  //    purple portal, so you can loop straight back up.
+  const stand = mega.w / 2 + 2.6;              // clear of the facade
+  const groundSpot = [mega.x - mega.w / 2 - 7, 3.5, mega.z];
   world.portals = [
-    { x: px, z: mega.z, y: 3.4, r: 2.6, rot: Math.PI / 2, color: 0xc26bff, emis: 0x9a2bff,
+    { x: mega.x - stand, z: mega.z, y: 3.4, r: 2.6, rot: Math.PI / 2, color: 0xc26bff, emis: 0x9a2bff,
       dest: [mega.x, mega.h + 5, mega.z], msg: '⚡ WARPED TO THE TOP' },
-    { x: px, z: mega.z, y: 500, r: 2.6, rot: Math.PI / 2, color: 0x5cff9a, emis: 0x1ecb6a,
-      dest: [mega.x - mega.w / 2 - 7, 3.5, mega.z], msg: '⚡ WARPED TO THE BOTTOM' },
   ];
+  [ { x: mega.x - stand, z: mega.z, rot: Math.PI / 2 },   // west face
+    { x: mega.x + stand, z: mega.z, rot: Math.PI / 2 },   // east face
+    { x: mega.x, z: mega.z - stand, rot: 0 },             // south face
+    { x: mega.x, z: mega.z + stand, rot: 0 },             // north face
+  ].forEach(f => world.portals.push({
+    x: f.x, z: f.z, y: 250, r: 2.6, rot: f.rot,
+    color: 0x5cff9a, emis: 0x1ecb6a, dest: groundSpot, msg: '⚡ WARPED TO THE BOTTOM',
+  }));
   addRaceGates();
 }
 
@@ -3157,28 +3165,7 @@ function buildCity3D(scene) {
         by += tierH; cw *= setback; cd *= setback;
       }
     }
-    // Mega tower: a wide flat rooftop deck (a proper landing pad) that
-    // overhangs the tower, with its own collider so you can perch on the whole
-    // platform. A painted ring marks the pad.
-    if (t.mega) {
-      const deckW = t.w * 1.6, deckH = 1.6;
-      const deck = new THREE.Mesh(unit, new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.9 }));
-      deck.scale.set(deckW, deckH, deckW); deck.position.y = by + deckH / 2;
-      deck.castShadow = true; deck.receiveShadow = true; g.add(deck);
-      // Low parapet rail around the edge.
-      const railMat = new THREE.MeshStandardMaterial({ color: 0x6a7078, roughness: 0.85 });
-      [[deckW / 2, 0, 0.4, deckW], [-deckW / 2, 0, 0.4, deckW], [0, deckW / 2, deckW, 0.4], [0, -deckW / 2, deckW, 0.4]].forEach(([lx, lz, sx, sz]) => {
-        const rail = new THREE.Mesh(unit, railMat);
-        rail.scale.set(sx, 1.1, sz); rail.position.set(lx, by + deckH + 0.55, lz); g.add(rail);
-      });
-      // Helipad ring marking.
-      const pad = new THREE.Mesh(new THREE.RingGeometry(deckW * 0.24, deckW * 0.3, 32),
-        new THREE.MeshStandardMaterial({ color: 0xf0d24a, roughness: 0.8, side: THREE.DoubleSide }));
-      pad.rotation.x = -Math.PI / 2; pad.position.y = by + deckH + 0.02; g.add(pad);
-      t.colliders.push({ x0: t.x - deckW / 2, x1: t.x + deckW / 2, z0: t.z - deckW / 2, z1: t.z + deckW / 2, y0: by, y1: by + deckH });
-      by += deckH;
-    }
-    // Rooftop clutter (not on the mega tower's helipad).
+    // Rooftop clutter (the mega tower's roof stays clear to land on).
     for (let i = 0; !t.mega && i < 1 + (Math.floor(t.litSeed) % 3); i++) {
       const ac = new THREE.Mesh(unit, acMat);
       const s2 = 0.7 + Math.random() * 1.1; ac.scale.set(s2, 0.5 + Math.random() * 0.7, s2);
