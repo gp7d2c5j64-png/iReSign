@@ -2733,17 +2733,24 @@ function buildCity() {
   world.towers.push(mega);
   // A hot-air balloon drifting among the towers (a nod to the reference).
   world.balloon = { x: 6, y: 66, z: 96, r: 5 };
-  // Two portals on the tower's avenue-facing side:
-  //  • base (purple)   → warps up to the roof
-  //  • up high (green) → warps back down to the ground. Kept just under the
-  //    roofline so it sits on the facade rather than clipping the roof slab.
-  const px = mega.x - mega.w / 2 - 2.6;
+  // Portals on the landmark tower:
+  //  • base, avenue side (purple) → warps up to the roof
+  //  • 250 m on EVERY face (green) → warps back down to the ground by the
+  //    purple portal, so you can loop straight back up.
+  const stand = mega.w / 2 + 2.6;              // clear of the facade
+  const groundSpot = [mega.x - mega.w / 2 - 7, 3.5, mega.z];
   world.portals = [
-    { x: px, z: mega.z, y: 3.4, r: 2.6, rot: Math.PI / 2, color: 0xc26bff, emis: 0x9a2bff,
+    { x: mega.x - stand, z: mega.z, y: 3.4, r: 2.6, rot: Math.PI / 2, color: 0xc26bff, emis: 0x9a2bff,
       dest: [mega.x, mega.h + 5, mega.z], msg: '⚡ WARPED TO THE TOP' },
-    { x: px, z: mega.z, y: mega.h - 12, r: 2.6, rot: Math.PI / 2, color: 0x5cff9a, emis: 0x1ecb6a,
-      dest: [mega.x - mega.w / 2 - 7, 3.5, mega.z], msg: '⚡ WARPED TO THE BOTTOM' },
   ];
+  [ { x: mega.x - stand, z: mega.z, rot: Math.PI / 2 },   // west face
+    { x: mega.x + stand, z: mega.z, rot: Math.PI / 2 },   // east face
+    { x: mega.x, z: mega.z - stand, rot: 0 },             // south face
+    { x: mega.x, z: mega.z + stand, rot: 0 },             // north face
+  ].forEach(f => world.portals.push({
+    x: f.x, z: f.z, y: 250, r: 2.6, rot: f.rot,
+    color: 0x5cff9a, emis: 0x1ecb6a, dest: groundSpot, msg: '⚡ WARPED TO THE BOTTOM',
+  }));
   addRaceGates();
 }
 
